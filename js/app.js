@@ -2,54 +2,15 @@
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const app = $('#app');
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const uid = () => Math.random().toString(36).slice(2, 10);
   const clonar = (o) => JSON.parse(JSON.stringify(o));
-
-  // ---------- Iconos ----------
-  const ICONOS = {
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>',
-    copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-    up: '<path d="m18 15-6-6-6 6"/>',
-    down: '<path d="m6 9 6 6 6-6"/>',
-    share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
-    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-    back: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
-    logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
-    search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
-    check: '<path d="M20 6 9 17l-5-5"/>',
-    x: '<path d="M18 6 6 18M6 6l12 12"/>',
-    more: '<circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/>',
-    form: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
-    award: '<circle cx="12" cy="8" r="6"/><path d="M8.2 13.3 7 22l5-3 5 3-1.2-8.7"/>',
-    link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
-    sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
-    chart: '<path d="M3 3v18h18"/><path d="M7 16v-4M12 16V8M17 16v-7"/>',
-    list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
-    users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    sparkles: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"/>',
-    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5V21h16"/>',
-    external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
-    radio: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>',
-    checkbox: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>',
-    toggle: '<rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="3"/>',
-    texto: '<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
-    parrafo: '<path d="M4 6h16M4 10h16M4 14h16M4 18h10"/>',
-    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
-    trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
-    alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>'
-  };
-  const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONOS[n] || ''}</svg>`;
 
   const TIPOS = {
     unica: { nombre: 'Opción única', icono: 'radio' },
     multiple: { nombre: 'Opción múltiple', icono: 'checkbox' },
     vf: { nombre: 'Verdadero / Falso', icono: 'toggle' },
     corta: { nombre: 'Respuesta corta', icono: 'texto' },
-    parrafo: { nombre: 'Párrafo', icono: 'parrafo' }
+    parrafo: { nombre: 'Párrafo', icono: 'parrafo' },
+    ...Tipos.LISTA
   };
   const esOpciones = (t) => t === 'unica' || t === 'multiple' || t === 'vf';
 
@@ -70,12 +31,13 @@
     if (tipo === 'unica' || tipo === 'multiple') p.opciones = [{ id: uid(), texto: 'Opción 1' }, { id: uid(), texto: 'Opción 2' }];
     if (tipo === 'vf') p.opciones = [{ id: 'v', texto: 'Verdadero' }, { id: 'f', texto: 'Falso' }];
     if (tipo === 'parrafo') p.puntos = 0;
-    return p;
+    return Object.assign(p, Tipos.nueva(tipo));
   }
 
   function cambiarTipo(p, tipo) {
     const antes = p.tipo;
     p.tipo = tipo;
+    Tipos.aplicarTipo(p, tipo);
     if (tipo === 'vf') {
       p.opciones = [{ id: 'v', texto: 'Verdadero' }, { id: 'f', texto: 'Falso' }];
       p.correctas = [];
@@ -234,7 +196,9 @@
     const { partes, params } = ruta();
     $$('.modal-backdrop').forEach((m) => m.remove());
 
+    Diseno.quitarDePagina();
     if (partes[0] === 'responder') return vistaResponder(partes[1], params.get('preview') === '1', id);
+    if (partes[0] === 'confirmado') return vistaConfirmado(params.get('error') === '1');
     if (!Sesion.usuario()) return vistaLogin();
     if (partes[0] === 'login') { location.hash = '#/formularios'; return; }
 
@@ -571,7 +535,7 @@
   });
 
   async function vistaEditor(id, tab, rid) {
-    if (!['preguntas', 'respuestas', 'configuracion'].includes(tab)) tab = 'preguntas';
+    if (!['preguntas', 'diseno', 'respuestas', 'configuracion'].includes(tab)) tab = 'preguntas';
     if (!E || E.form.id !== id) {
       app.innerHTML = `${topbar()}<main class="container narrow"><div class="loader"><span></span></div></main>`;
       enlazarTopbar();
@@ -580,6 +544,7 @@
         if (rid !== renderId) return;
         form.config = Object.assign({}, CONFIG_BASE, form.config || {});
         form.preguntas = form.preguntas || [];
+        form.diseno = Diseno.normalizar(form.diseno);
         E = { form, tab, respuestas: null, sucio: false, timer: null, guardando: null };
       } catch (err) {
         if (rid !== renderId) return;
@@ -591,7 +556,7 @@
     E.tab = tab;
     const f = E.form;
     document.title = `${f.titulo || 'Sin título'} · ${window.CONFIG.NOMBRE}`;
-    const tabs = [['preguntas', 'list', 'Preguntas'], ['respuestas', 'chart', 'Respuestas'], ['configuracion', 'sliders', 'Configuración']];
+    const tabs = [['preguntas', 'list', 'Preguntas'], ['diseno', 'palette', 'Diseño'], ['respuestas', 'chart', 'Respuestas'], ['configuracion', 'sliders', 'Configuración']];
     app.innerHTML = `
       <header class="topbar editor-bar">
         <div class="eb-left">
@@ -609,7 +574,7 @@
           <button class="btn btn-primary" id="btnCompartir">${ic('share')}<span>Compartir</span></button>
         </div>
       </header>
-      <main class="container narrow editor" id="editorBody"></main>`;
+      <main class="container narrow editor ${tab === 'diseno' ? 'wide' : ''}" id="editorBody"></main>`;
 
     $('#btnCompartir').addEventListener('click', async () => {
       await guardarSiHayCambios();
@@ -629,6 +594,7 @@
     const cuerpo = $('#editorBody');
     if (tab === 'preguntas') pintarPreguntas();
     else if (tab === 'configuracion') pintarConfig();
+    else if (tab === 'diseno') pintarDiseno();
     else pintarRespuestas(rid);
 
     cuerpo.addEventListener('input', onEditorInput);
@@ -652,6 +618,11 @@
     }
     const p = preguntaDe(t);
     if (!p) return;
+    if (t.dataset.t && Tipos.input(t, p)) {
+      actualizarAviso(p);
+      programarGuardado();
+      return;
+    }
     if (t.dataset.q === 'texto') p.texto = t.value;
     else if (t.dataset.q === 'puntos') {
       p.puntos = Math.max(0, Number(t.value) || 0);
@@ -679,6 +650,12 @@
     }
     const p = preguntaDe(t);
     if (!p) return;
+    if (t.dataset.t === 'imagen') {
+      Tipos.change(t, p)
+        .then((cambio) => { if (cambio) { pintarPreguntas(); programarGuardado(); } })
+        .catch((err) => toast(err.message, 'err'));
+      return;
+    }
     if (t.dataset.q === 'tipo') {
       cambiarTipo(p, t.value);
       pintarPreguntas();
@@ -690,6 +667,15 @@
   }
 
   function onEditorClick(e) {
+    const ta = e.target.closest('[data-ta]');
+    if (ta && !e.target.closest('[data-qa]')) {
+      const pt = preguntaDe(ta);
+      if (pt && Tipos.click(e, ta, pt, E.form.config.esExamen)) {
+        pintarPreguntas();
+        programarGuardado();
+      }
+      return;
+    }
     const b = e.target.closest('[data-qa]');
     if (!b) return;
     const lista = E.form.preguntas;
@@ -768,13 +754,18 @@
   function avisoPregunta(p) {
     if (!E.form.config.esExamen || p.tipo === 'parrafo') return '';
     if (esCalificable(p)) return `<span class="q-ok">${ic('check')} Respuesta configurada</span>`;
-    return `<span class="q-warn">${ic('alert')} ${p.tipo === 'corta' ? 'Agrega al menos una respuesta aceptada' : 'Marca la respuesta correcta'}</span>`;
+    return `<span class="q-warn">${ic('alert')} ${p.tipo === 'corta' ? 'Agrega al menos una respuesta aceptada' : Tipos.es(p.tipo) ? Tipos.aviso(p) : 'Marca la respuesta correcta'}</span>`;
   }
   function actualizarAviso(p) {
     const el = $(`[data-qid="${p.id}"] .q-aviso`);
     if (el) el.innerHTML = avisoPregunta(p);
     actualizarTotal();
   }
+
+  const gruposTipos = () => {
+    const todos = Object.entries(TIPOS);
+    return [['Básicas', todos.filter(([k]) => !Tipos.es(k))], ['Interactivas', todos.filter(([k]) => Tipos.es(k))]];
+  };
 
   function tarjetaPregunta(p, i, total) {
     const examen = E.form.config.esExamen;
@@ -791,6 +782,8 @@
           </div>`;
       }).join('')}</div>
       ${p.tipo !== 'vf' ? `<button type="button" class="link-btn" data-qa="agregarOpcion">${ic('plus')} Agregar opción</button>` : ''}`;
+    } else if (Tipos.es(p.tipo)) {
+      cuerpo = Tipos.editor(p, examen);
     } else if (p.tipo === 'corta') {
       cuerpo = `<div class="fake-input">Respuesta corta del participante</div>
         ${examen ? `<label class="field compact"><span>Respuestas aceptadas <small>(una por línea; no distingue mayúsculas ni acentos)</small></span>
@@ -806,7 +799,7 @@
           <label class="select">
             ${ic(TIPOS[p.tipo].icono)}
             <select data-q="tipo" aria-label="Tipo de pregunta">
-              ${Object.entries(TIPOS).map(([k, t]) => `<option value="${k}" ${k === p.tipo ? 'selected' : ''}>${t.nombre}</option>`).join('')}
+              ${gruposTipos().map(([g, tipos]) => `<optgroup label="${g}">${tipos.map(([k, t]) => `<option value="${k}" ${k === p.tipo ? 'selected' : ''}>${t.nombre}</option>`).join('')}</optgroup>`).join('')}
             </select>
             ${ic('down', 'chev')}
           </label>
@@ -848,11 +841,112 @@
       <div class="add-q">
         <button type="button" class="btn btn-add" data-qa="menuTipos">${ic('plus')} Agregar pregunta</button>
         <div class="type-menu" id="tipoMenu">
-          ${Object.entries(TIPOS).map(([k, t]) => `<button type="button" class="type-opt" data-qa="agregar" data-tipo="${k}">${ic(t.icono)}<span>${t.nombre}</span></button>`).join('')}
+          ${gruposTipos().map(([g, tipos]) => `<p class="type-group">${g}</p>${tipos.map(([k, t]) => `<button type="button" class="type-opt" data-qa="agregar" data-tipo="${k}">${ic(t.icono)}<span>${t.nombre}</span></button>`).join('')}`).join('')}
         </div>
       </div>`;
     $$('textarea', cuerpo).forEach(autoAltura);
     window.scrollTo(0, scroll);
+  }
+
+  // ---------- Diseño ----------
+  function pintarDiseno() {
+    const f = E.form;
+    const d = f.diseno;
+    const sel = (k, v) => (d[k] === v ? 'sel' : '');
+    Diseno.cargarFuentes(Diseno.FUENTES.map((x) => x.nombre));
+    const primera = f.preguntas[0];
+    $('#editorBody').innerHTML = `
+      <div class="design-layout" id="disenoRoot">
+        <div class="design-controls">
+          <section class="panel">
+            <h3>${ic('palette')} Plantillas</h3>
+            <p class="hint">Elige el estilo de la página que verán tus participantes.</p>
+            <div class="tpl-grid">
+              ${Object.entries(Diseno.PLANTILLAS).map(([k, t]) => `
+                <button type="button" class="tpl ${sel('plantilla', k)}" data-d="plantilla" data-v="${k}" style="--tbg:${t.fondo};--tcard:${t.card};--thero:${t.hero};--ta:linear-gradient(135deg, ${t.a1}, ${t.a2});--tline:${t.modo === 'claro' ? 'rgba(28,21,48,.18)' : 'rgba(255,255,255,.2)'};--tname:${t.modo === 'claro' ? '#1c1530' : '#fff'}">
+                  <span class="tpl-hero"></span>
+                  <span class="tpl-body"><span class="tpl-line"></span><span class="tpl-line short"></span><span class="tpl-btn"></span></span>
+                  <span class="tpl-name">${t.nombre}${t.modo === 'claro' ? ' <small>claro</small>' : ''}</span>
+                  <span class="tpl-check">${ic('check')}</span>
+                </button>`).join('')}
+            </div>
+          </section>
+          <section class="panel">
+            <h3>${ic('font')} Tipo de letra</h3>
+            <div class="font-grid">
+              ${Diseno.FUENTES.map((x) => `
+                <button type="button" class="font-opt ${sel('fuente', x.nombre)}" data-d="fuente" data-v="${esc(x.nombre)}">
+                  <strong style="font-family:'${x.nombre}'">Aa</strong><span>${esc(x.nombre)}</span><small>${esc(x.estilo)}</small>
+                </button>`).join('')}
+            </div>
+          </section>
+          <section class="panel">
+            <h3>${ic('size')} Tamaño de letra</h3>
+            <div class="size-seg">
+              ${Object.entries(Diseno.TAMANOS).map(([k, t]) => `
+                <button type="button" class="${sel('tamano', k)}" data-d="tamano" data-v="${k}"><span style="font-size:${t.px + 3}px">Aa</span>${t.nombre}</button>`).join('')}
+            </div>
+          </section>
+          <section class="panel">
+            <h3>${ic('sparkles')} Color de acento</h3>
+            <div class="swatches">
+              <button type="button" class="swatch auto ${d.acento ? '' : 'sel'}" data-d="acento" data-v="" title="Color de la plantilla">Auto</button>
+              ${Diseno.ACENTOS.map((c) => `<button type="button" class="swatch ${sel('acento', c)}" data-d="acento" data-v="${c}" style="--sw:${c}" aria-label="Color ${c}"></button>`).join('')}
+              <label class="swatch custom ${d.acento && !Diseno.ACENTOS.includes(d.acento) ? 'sel' : ''}" title="Color personalizado" style="--sw:${d.acento || '#a855f7'}">
+                <input type="color" id="colorLibre" value="${d.acento || '#a855f7'}">${ic('plus')}
+              </label>
+            </div>
+          </section>
+          <section class="panel">
+            <h3>${ic('image')} Imagen de encabezado</h3>
+            <p class="hint">Se muestra detrás del título, como en Microsoft Forms.</p>
+            <div class="img-upload">
+              <label class="btn btn-ghost btn-sm">${ic('image')} ${d.encabezado ? 'Cambiar imagen' : 'Subir imagen'}<input type="file" accept="image/*" id="imgEncabezado" hidden></label>
+              ${d.encabezado ? `<button type="button" class="link-btn danger" data-d="encabezado" data-v="">${ic('trash')} Quitar</button>` : ''}
+            </div>
+          </section>
+        </div>
+        <aside class="design-preview">
+          <p class="eyebrow">Vista previa</p>
+          <div class="public tema-preview" id="temaPreview">
+            <section class="pf-hero">
+              <h1>${esc(f.titulo || 'Formulario')}</h1>
+              ${f.descripcion ? `<p>${esc(f.descripcion)}</p>` : ''}
+              <div class="pf-meta"><span class="chip chip-glass">${ic('list')} ${f.preguntas.length} preguntas</span></div>
+            </section>
+            <section class="q-card public-q">
+              <div class="pq-head"><span class="q-num">1</span><h3>${esc((primera && primera.texto) || '¿Cuál es la respuesta correcta?')}<span class="req">*</span></h3></div>
+              <div class="choices">
+                <label class="choice"><input type="radio" name="demo" checked><span class="ind radio">${ic('check')}</span><span>Opción seleccionada</span></label>
+                <label class="choice"><input type="radio" name="demo"><span class="ind radio">${ic('check')}</span><span>Otra opción</span></label>
+              </div>
+            </section>
+            <div class="pf-actions"><span class="btn btn-primary">Enviar respuestas</span></div>
+          </div>
+          <a class="btn btn-ghost btn-block" href="${esc(ligaPublica(f.id))}?preview=1" target="_blank" rel="noopener">${ic('eye')} Abrir vista previa completa</a>
+        </aside>
+      </div>`;
+    const prev = $('#temaPreview');
+    Diseno.aplicar(prev, d);
+    const root = $('#disenoRoot');
+    root.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-d]');
+      if (!b) return;
+      d[b.dataset.d] = b.dataset.v;
+      programarGuardado();
+      pintarDiseno();
+    });
+    const color = $('#colorLibre');
+    color.addEventListener('input', () => { d.acento = color.value; Diseno.aplicar(prev, d); });
+    color.addEventListener('change', () => { d.acento = color.value; programarGuardado(); pintarDiseno(); });
+    $('#imgEncabezado').addEventListener('change', async (e) => {
+      try {
+        const { dataUrl } = await leerImagen(e.target.files[0], 1600);
+        d.encabezado = dataUrl;
+        programarGuardado();
+        pintarDiseno();
+      } catch (err) { toast(err.message, 'err'); }
+    });
   }
 
   function pintarConfig() {
@@ -892,6 +986,7 @@
 
   // ---------- Respuestas ----------
   function textoRespuesta(p, r) {
+    if (Tipos.es(p.tipo)) return Tipos.detalle(p, r);
     if (r == null || (Array.isArray(r) && !r.length) || r === '') return '<span class="muted">Sin respuesta</span>';
     if (esOpciones(p.tipo)) {
       const ids = Array.isArray(r) ? r : [r];
@@ -930,9 +1025,11 @@
     };
 
     const resumen = f.preguntas.map((p, i) => {
-      const resp = lista.map((r) => r.respuestas[p.id]).filter((r) => r != null && r !== '' && !(Array.isArray(r) && !r.length));
+      const resp = lista.map((r) => r.respuestas[p.id]).filter((r) => !respuestaVacia(r));
       let contenido;
-      if (esOpciones(p.tipo)) {
+      if (Tipos.es(p.tipo)) {
+        contenido = resp.length ? Tipos.resumen(p, resp, barra) : '<p class="muted">Sin respuestas todavía.</p>';
+      } else if (esOpciones(p.tipo)) {
         contenido = p.opciones.map((o) => {
           const n = resp.filter((r) => (Array.isArray(r) ? r.includes(o.id) : r === o.id)).length;
           return barra(esc(o.texto), n, resp.length, f.config.esExamen && p.correctas.includes(o.id));
@@ -944,8 +1041,9 @@
       }
       let aciertos = '';
       if (f.config.esExamen && esCalificable(p) && lista.length) {
-        const ok = lista.filter((r) => (r.detalle || []).some((d) => d.id === p.id && d.correcta)).length;
-        aciertos = `<span class="chip">${Math.round(ok / lista.length * 100)}% acertó</span>`;
+        const fr = lista.map((r) => (r.detalle || []).find((d) => d.id === p.id)).filter((d) => d && d.puntos);
+        const prom = fr.length ? fr.reduce((s, d) => s + d.obtenidos / d.puntos, 0) / fr.length : 0;
+        aciertos = `<span class="chip">${Math.round(prom * 100)}% de aciertos</span>`;
       }
       return `<div class="panel q-summary"><div class="qs-head"><span class="q-num">${i + 1}</span><strong>${esc(p.texto || 'Pregunta sin texto')}</strong>${aciertos}</div><p class="hint">${resp.length} respuesta${resp.length === 1 ? '' : 's'}</p>${contenido}</div>`;
     }).join('');
@@ -1014,6 +1112,8 @@
     });
   }
 
+  const estadoDe = (d) => !d || d.correcta === null ? '' : d.correcta ? 'ok' : d.obtenidos > 0 ? 'parcial' : 'bad';
+
   function verRespuesta(r) {
     const f = E.form;
     const detalle = {};
@@ -1028,10 +1128,12 @@
       <div class="resp-detail">
         ${f.preguntas.map((p, i) => {
           const d = detalle[p.id];
-          const estado = d && d.correcta !== null ? (d.correcta ? 'ok' : 'bad') : '';
+          const estado = estadoDe(d);
           return `<div class="rd-item ${estado}">
             <div class="rd-q"><span class="q-num">${i + 1}</span><strong>${esc(p.texto || 'Pregunta sin texto')}</strong>${d && d.correcta !== null ? `<span class="rd-pts">${d.obtenidos}/${d.puntos}</span>` : ''}</div>
-            <div class="rd-a">${estado ? ic(estado === 'ok' ? 'check' : 'x') : ''}<span>${textoRespuesta(p, r.respuestas[p.id])}</span></div>
+            ${Tipos.es(p.tipo)
+              ? `<div class="rd-rich">${Tipos.detalle(p, r.respuestas[p.id])}</div>`
+              : `<div class="rd-a">${estado ? ic(estado === 'ok' ? 'check' : 'x') : ''}<span>${textoRespuesta(p, r.respuestas[p.id])}</span></div>`}
           </div>`;
         }).join('')}
       </div>`);
@@ -1047,6 +1149,7 @@
     };
     const plano = (p, r) => {
       if (r == null) return '';
+      if (Tipos.es(p.tipo)) return Tipos.textoPlano(p, r);
       if (esOpciones(p.tipo)) return (Array.isArray(r) ? r : [r]).map((id) => (p.opciones.find((o) => o.id === id) || {}).texto || '').join('; ');
       return r;
     };
@@ -1081,7 +1184,7 @@
     if (rid !== renderId) return;
     document.title = `${form.titulo || 'Formulario'} · ${window.CONFIG.NOMBRE}`;
     if (form.cerrado) {
-      return pintarPublico(`<div class="result-card"><div class="result-icon muted-icon">${ic('clock')}</div><h2>${esc(form.titulo || 'Formulario')}</h2><p class="muted">Este formulario ya no acepta respuestas. Si crees que es un error, contacta a tu capacitador.</p></div>`);
+      return pintarPublico(`<div class="result-card"><div class="result-icon muted-icon">${ic('clock')}</div><h2>${esc(form.titulo || 'Formulario')}</h2><p class="muted">Este formulario ya no acepta respuestas. Si crees que es un error, contacta a tu capacitador.</p></div>`, false, form.diseno);
     }
 
     const preguntas = form.config.mezclarPreguntas ? mezclar(form.preguntas.slice()) : form.preguntas;
@@ -1098,13 +1201,15 @@
             <span class="ind ${tipo}">${ic('check')}</span>
             <span>${esc(o.texto)}</span>
           </label>`).join('')}</div>`;
+      } else if (Tipos.es(p.tipo)) {
+        entrada = Tipos.responder(p);
       } else if (p.tipo === 'corta') {
         entrada = `<input class="answer-input" name="q_${esc(p.id)}" placeholder="Tu respuesta" autocomplete="off">`;
       } else {
         entrada = `<textarea class="answer-input" name="q_${esc(p.id)}" rows="3" placeholder="Tu respuesta"></textarea>`;
       }
       return `
-        <section class="q-card public-q" data-pid="${esc(p.id)}" style="--i:${i}">
+        <section class="q-card public-q tipo-${esc(p.tipo)}" data-pid="${esc(p.id)}" style="--i:${i}">
           <div class="pq-head">
             <span class="q-num">${i + 1}</span>
             <h3>${esc(p.texto || 'Pregunta')}${p.obligatoria ? '<span class="req">*</span>' : ''}</h3>
@@ -1137,8 +1242,10 @@
         <div class="pf-actions">
           <button class="btn btn-primary btn-lg" id="btnEnviar">Enviar respuestas</button>
         </div>
-      </form>`, preview);
+      </form>`, preview, form.diseno);
 
+    const tarjeta = (p) => $(`[data-pid="${CSS.escape(p.id)}"]`);
+    preguntas.filter((p) => Tipos.es(p.tipo)).forEach((p) => Tipos.montar(tarjeta(p), p));
     const formEl = $('#pf');
     formEl.addEventListener('input', (e) => {
       const card = e.target.closest('.public-q');
@@ -1151,11 +1258,12 @@
       preguntas.forEach((p) => {
         const nombre = `q_${p.id}`;
         let r;
-        if (p.tipo === 'multiple') r = $$(`[name="${CSS.escape(nombre)}"]:checked`, formEl).map((x) => x.value);
+        if (Tipos.es(p.tipo)) r = Tipos.leer(tarjeta(p), p);
+        else if (p.tipo === 'multiple') r = $$(`[name="${CSS.escape(nombre)}"]:checked`, formEl).map((x) => x.value);
         else if (esOpciones(p.tipo)) r = ($(`[name="${CSS.escape(nombre)}"]:checked`, formEl) || {}).value;
         else r = (formEl.elements[nombre] || {}).value || '';
-        const vacio = r == null || (Array.isArray(r) ? !r.length : !String(r).trim());
-        if (!vacio) respuestas[p.id] = Array.isArray(r) ? r : String(r).trim() === '' ? undefined : r;
+        const vacio = respuestaVacia(r);
+        if (!vacio) respuestas[p.id] = r;
         if (p.obligatoria && vacio) invalidas.push(p.id);
       });
       const nombre = formEl.elements.nombre ? formEl.elements.nombre.value.trim() : '';
@@ -1181,14 +1289,36 @@
     });
   }
 
-  function pintarPublico(html, preview) {
+  function pintarPublico(html, preview, diseno) {
     app.innerHTML = `
       <div class="public">
         <header class="public-bar">${logo()}</header>
         ${preview ? `<div class="preview-banner">${ic('eye')} Vista previa · las respuestas no se guardan</div>` : ''}
         <main class="container narrow">${html}</main>
       </div>`;
+    Diseno.aplicar($('.public'), diseno);
     window.scrollTo(0, 0);
+  }
+
+  // Página a la que llega quien confirma su correo.
+  function vistaConfirmado(error) {
+    E = null;
+    const conSesion = !!Sesion.usuario();
+    document.title = `${error ? 'Liga vencida' : 'Correo confirmado'} · ${window.CONFIG.NOMBRE}`;
+    pintarPublico(error ? `
+      <div class="result-card confirm-card">
+        <div class="result-icon muted-icon">${ic('clock')}</div>
+        <h2>Esta liga ya no es válida</h2>
+        <p class="muted">La liga de confirmación venció o ya se usó. Si ya confirmaste tu correo, solo inicia sesión; si no, regístrate de nuevo para recibir otra.</p>
+        <a class="btn btn-primary btn-lg" href="#/login">Ir a iniciar sesión</a>
+      </div>` : `
+      <div class="result-card confirm-card">
+        <div class="confirm-art">${ic('mail')}<span class="confirm-check">${ic('check')}</span></div>
+        <p class="eyebrow">Cuenta verificada</p>
+        <h2>¡Tu correo quedó confirmado!</h2>
+        <p class="muted">${conSesion ? `Bienvenido${Sesion.usuario().nombre ? ', ' + esc(Sesion.usuario().nombre.split(' ')[0]) : ''}. Tu cuenta de capacitador ya está activa y lista para crear formularios y exámenes.` : 'Tu cuenta de capacitador ya está activa. Inicia sesión para empezar.'}</p>
+        <a class="btn btn-primary btn-lg" href="${conSesion ? '#/formularios' : '#/login'}">${conSesion ? 'Ir a mi panel' : 'Iniciar sesión'} ${ic('back', 'flip')}</a>
+      </div>`);
   }
 
   function mezclar(a) {
@@ -1207,7 +1337,7 @@
       html = `
         <div class="result-card">
           <div class="ring ${res.aprobado ? 'ok' : 'bad'}">
-            <svg viewBox="0 0 120 120"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#d946ef"/></linearGradient></defs>
+            <svg viewBox="0 0 120 120"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--p2)"/><stop offset="1" style="stop-color:var(--p3)"/></linearGradient></defs>
               <circle cx="60" cy="60" r="54" class="ring-bg"/>
               <circle cx="60" cy="60" r="54" class="ring-fg" stroke-dasharray="${c}" stroke-dashoffset="${c}" style="--off:${c * (1 - pct / 100)}"/></svg>
             <div class="ring-text"><strong data-count="${pct}">0%</strong><span>${res.puntaje} / ${res.maximo} pts</span></div>
@@ -1221,8 +1351,14 @@
         res.revision.forEach((d) => { rev[d.id] = d; });
         html += `<h3 class="section-title">${ic('list')} Revisión</h3>` + preguntas.map((p, i) => {
           const d = rev[p.id];
-          const estado = d && d.correcta !== null ? (d.correcta ? 'ok' : 'bad') : '';
+          const estado = estadoDe(d);
           let correcta = '';
+          if (Tipos.es(p.tipo)) {
+            return `<div class="rd-item panel ${estado}" style="--i:${i}">
+              <div class="rd-q"><span class="q-num">${i + 1}</span><strong>${esc(p.texto || 'Pregunta')}</strong>${d && d.correcta !== null ? `<span class="rd-pts">${d.obtenidos}/${d.puntos}</span>` : ''}</div>
+              <div class="rd-rich">${Tipos.detalle(conClave(p, d && d.clave), respuestas[p.id], !!(d && d.clave))}</div>
+            </div>`;
+          }
           if (d && d.correcta === false && d.clave) {
             correcta = esOpciones(p.tipo)
               ? d.clave.map((cid) => esc((p.opciones.find((o) => o.id === cid) || {}).texto || '')).join(', ')
@@ -1244,7 +1380,7 @@
         </div>`;
     }
     html += `<div class="pf-actions center"><button class="btn btn-ghost" id="otraVez">Enviar otra respuesta</button></div>`;
-    pintarPublico(html, preview);
+    pintarPublico(html, preview, form.diseno);
     $('#otraVez').addEventListener('click', () => render());
 
     const fg = $('.ring-fg');
@@ -1263,15 +1399,20 @@
   }
 
   // ---------- Inicio ----------
+  const barra = $('#scrollProgress');
+  const alDesplazar = () => {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    barra.style.transform = `scaleX(${max > 0 ? scrollY / max : 0})`;
+  };
+  window.addEventListener('scroll', alDesplazar, { passive: true });
+  window.addEventListener('resize', alDesplazar);
   window.addEventListener('hashchange', render);
   // Regreso desde el correo de confirmación de Supabase: la liga trae datos en el hash.
   const hashInicial = location.hash;
   API.iniciar().finally(() => {
     if (/access_token=|error_description=/.test(hashInicial)) {
       const err = new URLSearchParams(hashInicial.replace(/^#\/?/, '')).get('error_description');
-      history.replaceState(null, '', location.pathname + '#/formularios');
-      if (err) toast('La liga de confirmación ya no es válida. Inicia sesión o regístrate de nuevo.', 'err');
-      else if (Sesion.usuario()) toast('¡Cuenta confirmada!');
+      history.replaceState(null, '', location.pathname + (err ? '#/confirmado?error=1' : '#/confirmado'));
     }
     render();
   });

@@ -52,20 +52,12 @@ create policy "capacitador borra sus respuestas" on public.respuestas
   using (exists (select 1 from public.formularios f where f.id = form_id and f.owner = auth.uid()));
 
 -- ---------- Calificación ----------
+-- Mismas reglas que js/calificacion.js. Tipos: unica, multiple, vf, corta, parrafo,
+-- subrespuestas, puntoImagen, etiquetarImagen, ordenar, relacionar, huecos.
 
 create or replace function public._normalizar(t text) returns text
 language sql stable set search_path = public, extensions as $$
   select lower(regexp_replace(trim(extensions.unaccent(coalesce(t, ''))), '\s+', ' ', 'g'))
-$$;
-
-create or replace function public._calificable(p jsonb) returns boolean
-language sql immutable as $$
-  select case
-    when p->>'tipo' = 'parrafo' then false
-    when p->>'tipo' = 'corta' then exists (
-      select 1 from jsonb_array_elements_text(coalesce(p->'respuestasAceptadas', '[]')) a where trim(a) <> '')
-    else jsonb_array_length(coalesce(p->'correctas', '[]')) > 0
-  end
 $$;
 
 create or replace function public._bool(v jsonb) returns boolean
@@ -73,10 +65,188 @@ language sql immutable as $$
   select coalesce(v = 'true'::jsonb, false)
 $$;
 
+create or replace function public._texto(v jsonb) returns text
+language sql immutable as $$
+  select case when v is null or jsonb_typeof(v) = 'null' then '' else trim(v #>> '{}') end
+$$;
+
+-- true si alguna de las respuestas aceptadas coincide con r (sin mayúsculas, acentos ni espacios extra).
+create or replace function public._coincide(r text, aceptadas jsonb) returns boolean
+language sql stable set search_path = public as $$
+  select _normalizar(r) <> '' and exists (
+    select 1 from jsonb_array_elements_text(coalesce(aceptadas, '[]')) a where _normalizar(a) = _normalizar(r))
+$$;
+
+create or replace function public._vacia(r jsonb) returns boolean
+language sql immutable set search_path = public as $$
+  select case
+    when r is null or jsonb_typeof(r) = 'null' then true
+    when jsonb_typeof(r) = 'array' then not exists (select 1 from jsonb_array_elements(r) v where _texto(v) <> '')
+    when jsonb_typeof(r) = 'object' then not exists (select 1 from jsonb_each(r) v where _texto(v.value) <> '')
+    when jsonb_typeof(r) = 'string' then _texto(r) = ''
+    else false
+  end
+$$;
+
+create or replace function public._calificable(p jsonb) returns boolean
+language sql immutable set search_path = public as $$
+  select case p->>'tipo'
+    when 'parrafo' then false
+    when 'corta' then exists (
+      select 1 from jsonb_array_elements_text(coalesce(p->'respuestasAceptadas', '[]')) a where trim(a) <> '')
+    when 'subrespuestas' then exists (
+      select 1 from jsonb_array_elements(coalesce(p->'campos', '[]')) c,
+        jsonb_array_elements_text(coalesce(c->'aceptadas', '[]')) a where trim(a) <> '')
+    when 'puntoImagen' then _texto(p->'imagen') <> '' and jsonb_array_length(coalesce(p->'zonas', '[]')) > 0
+    when 'etiquetarImagen' then exists (
+      select 1 from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m where _texto(m->'texto') <> '')
+    when 'ordenar' then jsonb_array_length(coalesce(p->'elementos', '[]')) >= 2
+    when 'relacionar' then jsonb_array_length(coalesce(p->'pares', '[]')) >= 1
+    when 'huecos' then jsonb_array_length(coalesce(p->'huecos', '[]')) > 0
+    else jsonb_array_length(coalesce(p->'correctas', '[]')) > 0
+  end
+$$;
+
+-- Fracción de la pregunta contestada correctamente (0 a 1). Los tipos compuestos dan crédito parcial.
+create or replace function public._fraccion(p jsonb, r jsonb) returns numeric
+language plpgsql stable set search_path = public as $$
+declare
+  t text := p->>'tipo';
+  total int := 0;
+  buenos int := 0;
+  asp numeric;
+begin
+  if t = 'multiple' then
+    return case when jsonb_typeof(r) = 'array' and r @> (p->'correctas') and (p->'correctas') @> r then 1 else 0 end;
+  elsif t in ('unica', 'vf') then
+    return case when jsonb_typeof(r) = 'string' and (p->'correctas') ? (r #>> '{}') then 1 else 0 end;
+  elsif t = 'corta' then
+    return case when jsonb_typeof(r) = 'string' and _coincide(r #>> '{}', p->'respuestasAceptadas') then 1 else 0 end;
+  elsif t = 'puntoImagen' then
+    if jsonb_typeof(r) is distinct from 'object' or jsonb_typeof(r->'x') is distinct from 'number' or jsonb_typeof(r->'y') is distinct from 'number' then
+      return 0;
+    end if;
+    asp := coalesce((p->>'aspecto')::numeric, 1);
+    return case when exists (
+      select 1 from jsonb_array_elements(coalesce(p->'zonas', '[]')) z
+      where sqrt(power((r->>'x')::numeric - (z->>'x')::numeric, 2) + power(((r->>'y')::numeric - (z->>'y')::numeric) * asp, 2)) <= (z->>'r')::numeric
+    ) then 1 else 0 end;
+  elsif t = 'subrespuestas' then
+    select count(*), count(*) filter (where jsonb_typeof(r) = 'object' and _coincide(r->>(c->>'id'), c->'aceptadas'))
+      into total, buenos
+      from jsonb_array_elements(coalesce(p->'campos', '[]')) c
+      where exists (select 1 from jsonb_array_elements_text(coalesce(c->'aceptadas', '[]')) a where trim(a) <> '');
+  elsif t = 'etiquetarImagen' then
+    select count(*), count(*) filter (where jsonb_typeof(r) = 'object' and _coincide(r->>(m->>'id'), jsonb_build_array(m->'texto')))
+      into total, buenos
+      from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m
+      where _texto(m->'texto') <> '';
+  elsif t = 'ordenar' then
+    select count(*), count(*) filter (where jsonb_typeof(r) = 'array' and r->>(i - 1)::int = e->>'id')
+      into total, buenos
+      from jsonb_array_elements(coalesce(p->'elementos', '[]')) with ordinality as x (e, i);
+  elsif t = 'relacionar' then
+    select count(*), count(*) filter (where jsonb_typeof(r) = 'object' and _coincide(r->>(q->>'id'), jsonb_build_array(q->'derecha')))
+      into total, buenos
+      from jsonb_array_elements(coalesce(p->'pares', '[]')) q;
+  elsif t = 'huecos' then
+    select count(*), count(*) filter (where jsonb_typeof(r) = 'array' and _coincide(r->>(i - 1)::int, h))
+      into total, buenos
+      from jsonb_array_elements(coalesce(p->'huecos', '[]')) with ordinality as x (h, i);
+  else
+    return 0;
+  end if;
+  return case when total = 0 then 0 else buenos::numeric / total end;
+end;
+$$;
+
+-- Respuesta correcta, en el formato que recibe el participante al revisar.
+create or replace function public._clave(p jsonb) returns jsonb
+language sql immutable as $$
+  select case p->>'tipo'
+    when 'corta' then coalesce(p->'respuestasAceptadas', '[]')
+    when 'subrespuestas' then (select coalesce(jsonb_object_agg(c->>'id', coalesce(c->'aceptadas', '[]')), '{}')
+      from jsonb_array_elements(coalesce(p->'campos', '[]')) c)
+    when 'puntoImagen' then coalesce(p->'zonas', '[]')
+    when 'etiquetarImagen' then (select coalesce(jsonb_object_agg(m->>'id', coalesce(m->'texto', '""')), '{}')
+      from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m)
+    when 'ordenar' then (select coalesce(jsonb_agg(e->'id' order by i), '[]')
+      from jsonb_array_elements(coalesce(p->'elementos', '[]')) with ordinality as x (e, i))
+    when 'relacionar' then (select coalesce(jsonb_object_agg(q->>'id', q->'derecha'), '{}')
+      from jsonb_array_elements(coalesce(p->'pares', '[]')) q)
+    when 'huecos' then coalesce(p->'huecos', '[]')
+    else coalesce(p->'correctas', '[]')
+  end
+$$;
+
+-- Textos únicos ordenados (bancos de opciones sin revelar a qué corresponden).
+create or replace function public._banco(textos jsonb) returns jsonb
+language sql immutable set search_path = public as $$
+  select coalesce(jsonb_agg(t order by lower(t)), '[]')
+  from (select distinct trim(x) as t from jsonb_array_elements_text(coalesce(textos, '[]')) x where trim(x) <> '') d
+$$;
+
+-- Pregunta sin respuestas correctas.
+create or replace function public._pregunta_publica(p jsonb, examen boolean) returns jsonb
+language plpgsql volatile set search_path = public as $$
+declare
+  base jsonb;
+  mezcla jsonb;
+begin
+  base := jsonb_build_object(
+    'id', p->'id',
+    'tipo', p->'tipo',
+    'texto', p->'texto',
+    'obligatoria', _bool(p->'obligatoria'),
+    'puntos', case when examen and _calificable(p) then coalesce((p->>'puntos')::numeric, 0) else 0 end,
+    'opciones', coalesce((
+      select jsonb_agg(jsonb_build_object('id', o->'id', 'texto', o->'texto') order by oi)
+      from jsonb_array_elements(coalesce(p->'opciones', '[]')) with ordinality as x (o, oi)), '[]'));
+
+  case p->>'tipo'
+    when 'subrespuestas' then
+      base := base || jsonb_build_object('campos', coalesce((
+        select jsonb_agg(jsonb_build_object('id', c->'id', 'etiqueta', c->'etiqueta') order by i)
+        from jsonb_array_elements(coalesce(p->'campos', '[]')) with ordinality as x (c, i)), '[]'));
+    when 'puntoImagen' then
+      base := base || jsonb_build_object('imagen', coalesce(p->'imagen', '""'), 'aspecto', coalesce(p->'aspecto', '1'));
+    when 'etiquetarImagen' then
+      base := base || jsonb_build_object(
+        'imagen', coalesce(p->'imagen', '""'),
+        'aspecto', coalesce(p->'aspecto', '1'),
+        'marcadores', coalesce((
+          select jsonb_agg(jsonb_build_object('id', m->'id', 'x', m->'x', 'y', m->'y') order by i)
+          from jsonb_array_elements(coalesce(p->'marcadores', '[]')) with ordinality as x (m, i)), '[]'),
+        'banco', _banco(coalesce((select jsonb_agg(m->'texto') from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m
+                                  where jsonb_typeof(m->'texto') = 'string'), '[]') || coalesce(p->'distractores', '[]')));
+    when 'ordenar' then
+      -- Mezcla; si por azar queda en el orden correcto, rota una posición.
+      select coalesce(jsonb_agg(jsonb_build_object('id', e->'id', 'texto', e->'texto') order by random()), '[]')
+        into mezcla from jsonb_array_elements(coalesce(p->'elementos', '[]')) e;
+      if jsonb_array_length(mezcla) > 1 and (select jsonb_agg(m->'id') from jsonb_array_elements(mezcla) m) = _clave(p) then
+        mezcla := (mezcla - 0) || jsonb_build_array(mezcla->0);
+      end if;
+      base := base || jsonb_build_object('elementos', mezcla);
+    when 'relacionar' then
+      base := base || jsonb_build_object(
+        'izquierda', coalesce((
+          select jsonb_agg(jsonb_build_object('id', q->'id', 'texto', q->'izquierda') order by i)
+          from jsonb_array_elements(coalesce(p->'pares', '[]')) with ordinality as x (q, i)), '[]'),
+        'derecha', _banco(coalesce((select jsonb_agg(q->'derecha') from jsonb_array_elements(coalesce(p->'pares', '[]')) q
+                                    where jsonb_typeof(q->'derecha') = 'string'), '[]') || coalesce(p->'distractores', '[]')));
+    when 'huecos' then
+      base := base || jsonb_build_object('segmentos', coalesce(p->'segmentos', '[""]'));
+    else
+      null;
+  end case;
+  return base;
+end;
+$$;
+
 -- Formulario sin respuestas correctas, para quien lo va a contestar.
 create or replace function public.formulario_publico(p_id uuid, p_preview boolean default false)
 returns jsonb
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql volatile security definer set search_path = public as $$
 declare
   f public.formularios;
   cfg jsonb;
@@ -90,29 +260,21 @@ begin
   examen := _bool(cfg->'esExamen');
 
   if not _bool(cfg->'aceptaRespuestas') and not (coalesce(p_preview, false) and f.owner = auth.uid()) then
-    return jsonb_build_object('cerrado', true, 'titulo', f.datos->'titulo');
+    return jsonb_build_object('cerrado', true, 'titulo', f.datos->'titulo', 'diseno', coalesce(f.datos->'diseno', '{}'));
   end if;
 
   return jsonb_build_object(
     'id', f.id,
     'titulo', f.datos->'titulo',
     'descripcion', f.datos->'descripcion',
+    'diseno', coalesce(f.datos->'diseno', '{}'),
     'config', jsonb_build_object(
       'esExamen', examen,
       'pedirNombre', _bool(cfg->'pedirNombre'),
       'pedirCorreo', _bool(cfg->'pedirCorreo'),
       'mezclarPreguntas', _bool(cfg->'mezclarPreguntas')),
     'preguntas', coalesce((
-      select jsonb_agg(jsonb_build_object(
-        'id', p->'id',
-        'tipo', p->'tipo',
-        'texto', p->'texto',
-        'obligatoria', _bool(p->'obligatoria'),
-        'puntos', case when examen and _calificable(p) then coalesce((p->>'puntos')::numeric, 0) else 0 end,
-        'opciones', coalesce((
-          select jsonb_agg(jsonb_build_object('id', o->'id', 'texto', o->'texto') order by oi)
-          from jsonb_array_elements(coalesce(p->'opciones', '[]')) with ordinality as x (o, oi)), '[]')
-      ) order by pi)
+      select jsonb_agg(_pregunta_publica(p, examen) order by pi)
       from jsonb_array_elements(coalesce(f.datos->'preguntas', '[]')) with ordinality as y (p, pi)), '[]')
   );
 end;
@@ -135,8 +297,9 @@ declare
   es_preview boolean;
   p jsonb;
   r jsonb;
-  ok boolean;
   pts numeric;
+  frac numeric;
+  obt numeric;
   v_puntaje numeric := 0;
   v_maximo numeric := 0;
   v_porcentaje numeric;
@@ -164,11 +327,7 @@ begin
   for p in select value from jsonb_array_elements(coalesce(f.datos->'preguntas', '[]')) loop
     r := p_respuestas -> (p->>'id');
 
-    if _bool(p->'obligatoria') and (
-      r is null or jsonb_typeof(r) = 'null'
-      or (jsonb_typeof(r) = 'array' and jsonb_array_length(r) = 0)
-      or (jsonb_typeof(r) = 'string' and trim(r #>> '{}') = '')
-    ) then
+    if _bool(p->'obligatoria') and _vacia(r) then
       raise exception 'Faltan preguntas obligatorias por responder.';
     end if;
 
@@ -179,24 +338,12 @@ begin
     end if;
 
     pts := coalesce((p->>'puntos')::numeric, 0);
+    frac := coalesce(_fraccion(p, r), 0);
+    obt := round(pts * frac, 2);
     v_maximo := v_maximo + pts;
-
-    if p->>'tipo' = 'multiple' then
-      ok := jsonb_typeof(r) = 'array' and r @> (p->'correctas') and (p->'correctas') @> r;
-    elsif p->>'tipo' = 'corta' then
-      ok := jsonb_typeof(r) = 'string' and _normalizar(r #>> '{}') <> '' and exists (
-        select 1 from jsonb_array_elements_text(p->'respuestasAceptadas') a
-        where _normalizar(a) = _normalizar(r #>> '{}'));
-    else
-      ok := jsonb_typeof(r) = 'string' and (p->'correctas') ? (r #>> '{}');
-    end if;
-    ok := coalesce(ok, false);
-
-    if ok then
-      v_puntaje := v_puntaje + pts;
-    end if;
+    v_puntaje := v_puntaje + obt;
     v_detalle := v_detalle || jsonb_build_array(jsonb_build_object(
-      'id', p->'id', 'correcta', ok, 'obtenidos', case when ok then pts else 0 end, 'puntos', pts));
+      'id', p->'id', 'correcta', frac = 1, 'obtenidos', obt, 'puntos', pts));
   end loop;
 
   v_calificado := examen and v_maximo > 0;
@@ -216,9 +363,7 @@ begin
       'porcentaje', v_porcentaje, 'aprobado', v_aprobado);
     if _bool(cfg->'mostrarCorrectas') then
       select jsonb_agg(d || jsonb_build_object('clave',
-          case when d->'correcta' = 'null'::jsonb then null
-               when q->>'tipo' = 'corta' then q->'respuestasAceptadas'
-               else q->'correctas' end) order by i)
+          case when d->'correcta' = 'null'::jsonb then null else _clave(q) end) order by i)
         into v_revision
         from jsonb_array_elements(v_detalle) with ordinality as a (d, i)
         join jsonb_array_elements(f.datos->'preguntas') with ordinality as b (q, j) on i = j;

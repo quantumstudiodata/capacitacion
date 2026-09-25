@@ -101,7 +101,7 @@ const LocalBackend = (() => {
       const db = leer();
       const f = db.formularios.find((x) => x.id === b.id);
       if (!f) throw new Error('Este formulario no existe o fue eliminado.');
-      if (!f.data.config.aceptaRespuestas && !b.preview) return { cerrado: true, titulo: f.data.titulo };
+      if (!f.data.config.aceptaRespuestas && !b.preview) return { cerrado: true, titulo: f.data.titulo, diseno: f.data.diseno || {} };
       return formPublico(f.data);
     },
     submit(b) {

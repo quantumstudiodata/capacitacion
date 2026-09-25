@@ -10,7 +10,8 @@ Portal para capacitadores estilo Microsoft Forms: inicias sesión, ves tus formu
 
 - Login y registro de capacitadores.
 - Panel "Mis formularios" con búsqueda, duplicar, compartir y eliminar.
-- Editor con autoguardado: opción única, opción múltiple, verdadero/falso, respuesta corta y párrafo.
+- Editor con autoguardado y 11 tipos de pregunta (ver abajo).
+- Pestaña **Diseño**: 12 plantillas (oscuras y claras), 12 tipos de letra, 4 tamaños, color de acento e imagen de encabezado.
 - Exámenes: puntos por pregunta, respuestas correctas, calificación aprobatoria y calificación automática **en el servidor** (quien responde nunca ve las respuestas correctas antes de enviar).
 - Liga pública para responder (sin cuenta), vista previa, abrir/cerrar respuestas.
 - Resultados: estadísticas, respuestas individuales, resumen por pregunta y exportación a CSV.
@@ -55,8 +56,56 @@ Opcional:
 | `js/app.js` | Pantallas: login, panel, editor, respuestas y formulario público |
 | `js/supabase-backend.js` | Conexión con Supabase |
 | `js/local-backend.js` | Modo demo (localStorage) |
-| `js/calificacion.js` | Reglas de calificación del modo demo |
+| `js/calificacion.js` | Reglas de calificación (demo y revisión de resultados) |
+| `js/tipos.js` | Tipos interactivos: editor, respuesta y revisión |
+| `js/diseno.js` | Plantillas, fuentes y tamaños |
+| `js/ui.js` | Iconos y utilidades compartidas |
 | `supabase.sql` | Tablas, seguridad y calificación en Supabase |
+
+## Tipos de pregunta
+
+Básicas: opción única, opción múltiple, verdadero/falso, respuesta corta y párrafo.
+Interactivas (las compuestas dan **crédito parcial**):
+
+| Tipo | Cómo responde | Cómo se califica |
+| --- | --- | --- |
+| `subrespuestas` | Un campo de texto por etiqueta | Proporción de campos correctos |
+| `puntoImagen` | Toca la imagen (se guarda x/y en %) | Correcto si cae dentro de alguna zona |
+| `etiquetarImagen` | Elige la etiqueta de cada punto numerado | Proporción de puntos correctos |
+| `ordenar` | Arrastra (o usa flechas) | Proporción de posiciones correctas |
+| `relacionar` | Líneas entre columnas (en celular, listas) | Proporción de pares correctos |
+| `huecos` | Escribe dentro del párrafo | Proporción de espacios correctos |
+
+Los textos se comparan sin mayúsculas, acentos ni espacios extra. Quien responde nunca recibe las respuestas correctas: la versión pública las quita, mezcla los elementos a ordenar y ordena alfabéticamente los bancos de opciones.
+
+### Modelos de datos
+
+Cada pregunta comparte `{ id, tipo, texto, obligatoria, puntos }` y agrega:
+
+```jsonc
+// subrespuestas → respuesta: { "c1": "incendio", "c2": "humo" }
+{ "campos": [{ "id": "c1", "etiqueta": "Causa", "aceptadas": ["fuego", "incendio"] }] }
+
+// puntoImagen → respuesta: { "x": 27.4, "y": 51.2 }  (porcentajes)
+// r = radio en % del ancho; aspecto = alto/ancho de la imagen
+{ "imagen": "data:image/jpeg;base64,...", "aspecto": 0.625, "zonas": [{ "x": 25, "y": 50, "r": 8 }] }
+
+// etiquetarImagen → respuesta: { "k1": "Casco", "k2": "Guantes" }
+{ "imagen": "...", "aspecto": 0.625,
+  "marcadores": [{ "id": "k1", "x": 25, "y": 50, "texto": "Casco" }], "distractores": ["Botas"] }
+
+// ordenar (guardado en el orden correcto) → respuesta: ["e1", "e2", "e3"]
+{ "elementos": [{ "id": "e1", "texto": "Dar la alarma" }, { "id": "e2", "texto": "Evacuar" }] }
+
+// relacionar → respuesta: { "p1": "Sólidos", "p2": "Líquidos" }
+{ "pares": [{ "id": "p1", "izquierda": "Clase A", "derecha": "Sólidos" }], "distractores": ["Metales"] }
+
+// huecos: se escribe "El número es [911] y el extintor [ABC|PQS]"  → respuesta: ["911", "pqs"]
+{ "plantilla": "...", "segmentos": ["El número es ", " y el extintor ", ""], "huecos": [["911"], ["ABC", "PQS"]] }
+```
+
+El diseño del formulario se guarda en `diseno`:
+`{ "plantilla": "galaxia", "fuente": "Poppins", "tamano": "grande", "acento": "#db2777", "encabezado": "data:image/..." }`.
 
 ## Reglas de calificación
 
@@ -64,3 +113,6 @@ Opcional:
 - **Opción múltiple**: puntos completos solo si marcó exactamente todas las correctas.
 - **Respuesta corta**: compara con las respuestas aceptadas sin distinguir mayúsculas, acentos ni espacios extra.
 - **Párrafo**: no se califica.
+- **Tipos interactivos**: ver la tabla de "Tipos de pregunta".
+
+> Cada vez que actualices el portal, vuelve a ejecutar `supabase.sql` en Supabase (se puede correr varias veces sin perder datos).
