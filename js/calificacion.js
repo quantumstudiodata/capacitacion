@@ -23,11 +23,17 @@ function esCalificable(p) {
     case 'subrespuestas': return (p.campos || []).some((c) => (c.aceptadas || []).some(tieneTexto));
     case 'puntoImagen': return !!p.imagen && (p.zonas || []).length > 0;
     case 'etiquetarImagen': return (p.marcadores || []).some((m) => tieneTexto(m.texto));
+    case 'zonasImagen': return (p.marcadores || []).some(zonaCalificable);
     case 'ordenar': return (p.elementos || []).length >= 2;
     case 'relacionar': return (p.pares || []).length >= 1;
     case 'huecos': return (p.huecos || []).length > 0;
     default: return (p.correctas || []).length > 0;
   }
+}
+
+// Un punto de "Zonas en imagen" se califica si tiene respuesta correcta según su modo.
+function zonaCalificable(m) {
+  return m.modo === 'corta' ? (m.aceptadas || []).some(tieneTexto) : tieneTexto(m.correcta);
 }
 
 // Una respuesta está vacía si no tiene ningún texto (sirve para cualquier tipo).
@@ -54,6 +60,16 @@ function desglose(p, r) {
         etiqueta: `Punto ${i + 1}`, respuesta: obj[m.id] || '', correcta: m.texto || '',
         ok: tieneTexto(m.texto) ? coincide(obj[m.id], [m.texto]) : null
       }));
+    case 'zonasImagen':
+      return (p.marcadores || []).map((m, i) => {
+        const r = obj[m.id];
+        if (m.modo === 'corta') {
+          const ac = (m.aceptadas || []).filter(tieneTexto);
+          return { etiqueta: `Punto ${i + 1}`, respuesta: r || '', correcta: ac.join(' / '), ok: ac.length ? coincide(r, ac) : null };
+        }
+        const texto = (id) => ((m.opciones || []).find((o) => o.id === id) || {}).texto || '';
+        return { etiqueta: `Punto ${i + 1}`, respuesta: texto(r), correcta: texto(m.correcta), ok: tieneTexto(m.correcta) ? r === m.correcta : null };
+      });
     case 'ordenar': {
       const els = p.elementos || [];
       const texto = (id) => (els.find((e) => e.id === id) || {}).texto || '';
@@ -127,6 +143,8 @@ function claveDe(p) {
     case 'subrespuestas': return Object.fromEntries((p.campos || []).map((c) => [c.id, c.aceptadas || []]));
     case 'puntoImagen': return p.zonas || [];
     case 'etiquetarImagen': return Object.fromEntries((p.marcadores || []).map((m) => [m.id, m.texto || '']));
+    case 'zonasImagen': return Object.fromEntries((p.marcadores || []).map((m) => [m.id,
+      m.modo === 'corta' ? m.aceptadas || [] : tieneTexto(m.correcta) ? [m.correcta] : []]));
     case 'ordenar': return (p.elementos || []).map((e) => e.id);
     case 'relacionar': return Object.fromEntries((p.pares || []).map((q) => [q.id, q.derecha]));
     case 'huecos': return p.huecos || [];
@@ -143,6 +161,8 @@ function conClave(pub, clave) {
     case 'subrespuestas': p.campos = (pub.campos || []).map((c) => Object.assign({}, c, { aceptadas: clave[c.id] || [] })); break;
     case 'puntoImagen': p.zonas = clave; break;
     case 'etiquetarImagen': p.marcadores = (pub.marcadores || []).map((m) => Object.assign({}, m, { texto: clave[m.id] || '' })); break;
+    case 'zonasImagen': p.marcadores = (pub.marcadores || []).map((m) => Object.assign({}, m, m.modo === 'corta'
+      ? { aceptadas: clave[m.id] || [] } : { correcta: (clave[m.id] || [])[0] || '' })); break;
     case 'ordenar': p.elementos = clave.map((id) => (pub.elementos || []).find((e) => e.id === id)).filter(Boolean); break;
     case 'relacionar': p.pares = (pub.izquierda || []).map((q) => ({ id: q.id, izquierda: q.texto, derecha: clave[q.id] || '' })); break;
     case 'huecos': p.huecos = clave; break;
@@ -175,7 +195,8 @@ function preguntaPublica(p, examen) {
   const base = {
     id: p.id, tipo: p.tipo, texto: p.texto, obligatoria: !!p.obligatoria,
     puntos: examen && esCalificable(p) ? Number(p.puntos) || 0 : 0,
-    opciones: (p.opciones || []).map((o) => ({ id: o.id, texto: o.texto }))
+    opciones: (p.opciones || []).map((o) => ({ id: o.id, texto: o.texto })),
+    apoyo: p.apoyo && p.apoyo.imagen ? { imagen: p.apoyo.imagen, posicion: p.apoyo.posicion || 'arriba' } : null
   };
   switch (p.tipo) {
     case 'subrespuestas':
@@ -190,6 +211,14 @@ function preguntaPublica(p, examen) {
       base.aspecto = p.aspecto || 1;
       base.marcadores = (p.marcadores || []).map((m) => ({ id: m.id, x: m.x, y: m.y }));
       base.banco = unicosOrdenados((p.marcadores || []).map((m) => m.texto).concat(p.distractores || []));
+      break;
+    case 'zonasImagen':
+      base.imagen = p.imagen || '';
+      base.aspecto = p.aspecto || 1;
+      base.marcadores = (p.marcadores || []).map((m) => ({
+        id: m.id, x: m.x, y: m.y, r: m.r || 0, modo: m.modo || 'opciones',
+        opciones: m.modo === 'corta' ? [] : (m.opciones || []).map((o) => ({ id: o.id, texto: o.texto }))
+      }));
       break;
     case 'ordenar':
       base.elementos = mezclarOrden((p.elementos || []).map((e) => ({ id: e.id, texto: e.texto })));

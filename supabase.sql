@@ -53,7 +53,8 @@ create policy "capacitador borra sus respuestas" on public.respuestas
 
 -- ---------- Calificación ----------
 -- Mismas reglas que js/calificacion.js. Tipos: unica, multiple, vf, corta, parrafo,
--- subrespuestas, puntoImagen, etiquetarImagen, ordenar, relacionar, huecos.
+-- subrespuestas, puntoImagen, etiquetarImagen, zonasImagen, ordenar, relacionar, huecos.
+-- Cualquier pregunta puede traer una imagen de apoyo: { "apoyo": { "imagen": "data:...", "posicion": "arriba" | "lado" } }.
 
 create or replace function public._normalizar(t text) returns text
 language sql stable set search_path = public, extensions as $$
@@ -88,6 +89,14 @@ language sql immutable set search_path = public as $$
   end
 $$;
 
+-- Un punto de "Zonas en imagen" se califica si tiene respuesta correcta según su modo.
+create or replace function public._zona_calificable(m jsonb) returns boolean
+language sql immutable set search_path = public as $$
+  select case when m->>'modo' = 'corta'
+    then exists (select 1 from jsonb_array_elements_text(coalesce(m->'aceptadas', '[]')) a where trim(a) <> '')
+    else _texto(m->'correcta') <> '' end
+$$;
+
 create or replace function public._calificable(p jsonb) returns boolean
 language sql immutable set search_path = public as $$
   select case p->>'tipo'
@@ -100,6 +109,8 @@ language sql immutable set search_path = public as $$
     when 'puntoImagen' then _texto(p->'imagen') <> '' and jsonb_array_length(coalesce(p->'zonas', '[]')) > 0
     when 'etiquetarImagen' then exists (
       select 1 from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m where _texto(m->'texto') <> '')
+    when 'zonasImagen' then exists (
+      select 1 from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m where _zona_calificable(m))
     when 'ordenar' then jsonb_array_length(coalesce(p->'elementos', '[]')) >= 2
     when 'relacionar' then jsonb_array_length(coalesce(p->'pares', '[]')) >= 1
     when 'huecos' then jsonb_array_length(coalesce(p->'huecos', '[]')) > 0
@@ -141,6 +152,13 @@ begin
       into total, buenos
       from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m
       where _texto(m->'texto') <> '';
+  elsif t = 'zonasImagen' then
+    select count(*), count(*) filter (where jsonb_typeof(r) = 'object' and case
+        when m->>'modo' = 'corta' then _coincide(r->>(m->>'id'), m->'aceptadas')
+        else _texto(r->(m->>'id')) = _texto(m->'correcta') end)
+      into total, buenos
+      from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m
+      where _zona_calificable(m);
   elsif t = 'ordenar' then
     select count(*), count(*) filter (where jsonb_typeof(r) = 'array' and r->>(i - 1)::int = e->>'id')
       into total, buenos
@@ -169,6 +187,11 @@ language sql immutable as $$
       from jsonb_array_elements(coalesce(p->'campos', '[]')) c)
     when 'puntoImagen' then coalesce(p->'zonas', '[]')
     when 'etiquetarImagen' then (select coalesce(jsonb_object_agg(m->>'id', coalesce(m->'texto', '""')), '{}')
+      from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m)
+    when 'zonasImagen' then (select coalesce(jsonb_object_agg(m->>'id', case
+        when m->>'modo' = 'corta' then coalesce(m->'aceptadas', '[]')
+        when _texto(m->'correcta') <> '' then jsonb_build_array(m->'correcta')
+        else '[]'::jsonb end), '{}')
       from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m)
     when 'ordenar' then (select coalesce(jsonb_agg(e->'id' order by i), '[]')
       from jsonb_array_elements(coalesce(p->'elementos', '[]')) with ordinality as x (e, i))
@@ -201,7 +224,10 @@ begin
     'puntos', case when examen and _calificable(p) then coalesce((p->>'puntos')::numeric, 0) else 0 end,
     'opciones', coalesce((
       select jsonb_agg(jsonb_build_object('id', o->'id', 'texto', o->'texto') order by oi)
-      from jsonb_array_elements(coalesce(p->'opciones', '[]')) with ordinality as x (o, oi)), '[]'));
+      from jsonb_array_elements(coalesce(p->'opciones', '[]')) with ordinality as x (o, oi)), '[]'),
+    'apoyo', case when _texto(p->'apoyo'->'imagen') <> ''
+      then jsonb_build_object('imagen', p->'apoyo'->'imagen', 'posicion', coalesce(p->'apoyo'->'posicion', '"arriba"'))
+      else null end);
 
   case p->>'tipo'
     when 'subrespuestas' then
@@ -219,6 +245,19 @@ begin
           from jsonb_array_elements(coalesce(p->'marcadores', '[]')) with ordinality as x (m, i)), '[]'),
         'banco', _banco(coalesce((select jsonb_agg(m->'texto') from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m
                                   where jsonb_typeof(m->'texto') = 'string'), '[]') || coalesce(p->'distractores', '[]')));
+    when 'zonasImagen' then
+      base := base || jsonb_build_object(
+        'imagen', coalesce(p->'imagen', '""'),
+        'aspecto', coalesce(p->'aspecto', '1'),
+        'marcadores', coalesce((
+          select jsonb_agg(jsonb_build_object(
+            'id', m->'id', 'x', m->'x', 'y', m->'y', 'r', coalesce(m->'r', '0'),
+            'modo', coalesce(m->'modo', '"opciones"'),
+            'opciones', case when m->>'modo' = 'corta' then '[]'::jsonb else coalesce((
+              select jsonb_agg(jsonb_build_object('id', o->'id', 'texto', o->'texto') order by oi)
+              from jsonb_array_elements(coalesce(m->'opciones', '[]')) with ordinality as z (o, oi)), '[]') end
+          ) order by i)
+          from jsonb_array_elements(coalesce(p->'marcadores', '[]')) with ordinality as x (m, i)), '[]'));
     when 'ordenar' then
       -- Mezcla; si por azar queda en el orden correcto, rota una posición.
       select coalesce(jsonb_agg(jsonb_build_object('id', e->'id', 'texto', e->'texto') order by random()), '[]')
@@ -376,7 +415,7 @@ $$;
 
 -- Versión del esquema: el portal avisa al capacitador si su base de datos está desactualizada.
 create or replace function public.portal_version() returns int
-language sql immutable as $$ select 3 $$;
+language sql immutable as $$ select 4 $$;
 
 grant execute on function public.portal_version() to anon, authenticated;
 revoke all on function public.formulario_publico(uuid, boolean) from public;

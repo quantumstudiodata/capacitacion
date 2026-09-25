@@ -5,11 +5,13 @@ const Tipos = (() => {
     subrespuestas: { nombre: 'Párrafo con sub-respuestas', icono: 'layers' },
     puntoImagen: { nombre: 'Señalar en imagen', icono: 'crosshair' },
     etiquetarImagen: { nombre: 'Etiquetar imagen', icono: 'tag' },
+    zonasImagen: { nombre: 'Zonas en imagen', icono: 'target' },
     ordenar: { nombre: 'Ordenar elementos', icono: 'sort' },
     relacionar: { nombre: 'Relacionar columnas', icono: 'match' },
     huecos: { nombre: 'Completar espacios', icono: 'blank' }
   };
   const CAMPOS_PROPIOS = ['campos', 'imagen', 'aspecto', 'zonas', 'marcadores', 'distractores', 'elementos', 'pares', 'plantilla', 'segmentos', 'huecos'];
+  const CON_IMAGEN = ['puntoImagen', 'etiquetarImagen', 'zonasImagen'];
   const es = (t) => Object.prototype.hasOwnProperty.call(LISTA, t);
   const lineas = (v) => v.split('\n').map((x) => x.trim()).filter(Boolean);
   const redondear = (n) => Math.round(n * 10) / 10;
@@ -23,6 +25,8 @@ const Tipos = (() => {
         return { imagen: '', aspecto: 1, zonas: [] };
       case 'etiquetarImagen':
         return { imagen: '', aspecto: 1, marcadores: [], distractores: [] };
+      case 'zonasImagen':
+        return { imagen: '', aspecto: 1, marcadores: [] };
       case 'ordenar':
         return { elementos: ['Primer paso', 'Segundo paso', 'Tercer paso'].map((texto) => ({ id: uid(), texto })) };
       case 'relacionar':
@@ -38,7 +42,7 @@ const Tipos = (() => {
     const imagen = p.imagen ? { imagen: p.imagen, aspecto: p.aspecto } : null;
     CAMPOS_PROPIOS.forEach((k) => { delete p[k]; });
     Object.assign(p, nueva(tipo));
-    if (imagen && (tipo === 'puntoImagen' || tipo === 'etiquetarImagen')) Object.assign(p, imagen);
+    if (imagen && CON_IMAGEN.includes(tipo)) Object.assign(p, imagen);
   }
 
   function parsearHuecos(t) {
@@ -60,6 +64,7 @@ const Tipos = (() => {
       case 'subrespuestas': return 'Escribe la respuesta correcta de al menos un campo';
       case 'puntoImagen': return p.imagen ? 'Haz clic en la imagen para marcar la zona correcta' : 'Sube una imagen';
       case 'etiquetarImagen': return p.imagen ? 'Agrega puntos y escribe su etiqueta' : 'Sube una imagen';
+      case 'zonasImagen': return p.imagen ? 'Marca puntos y define la respuesta correcta de cada uno' : 'Sube una imagen';
       case 'ordenar': return 'Agrega al menos dos elementos';
       case 'relacionar': return 'Agrega al menos un par';
       case 'huecos': return 'Escribe la respuesta entre [corchetes]';
@@ -130,6 +135,16 @@ const Tipos = (() => {
             <label class="field compact"><span>Opciones de distracción <small>(una por línea, opcional)</small></span>
               <textarea data-t="distractores" rows="2" placeholder="Etiquetas extra que no corresponden a ningún punto">${esc((p.distractores || []).join('\n'))}</textarea></label>` : ''}`;
 
+      case 'zonasImagen':
+        return `${cargadorImagen(p)}
+          ${p.imagen ? `
+            <p class="hint">Haz clic en la imagen para marcar cada punto o zona. Para cada uno elige si se responde con <strong>opción múltiple</strong> o con <strong>respuesta corta</strong>.</p>
+            <div class="img-stage editable" data-ta="imgClick">
+              <img src="${p.imagen}" alt="" draggable="false">
+              ${marcasZonas(p)}
+            </div>
+            <div class="zm-list">${p.marcadores.map((m, i) => editorMarcador(m, i, examen)).join('')}</div>` : ''}`;
+
       case 'ordenar':
         return `
           <p class="hint">Escribe los elementos en el <strong>orden correcto</strong>. A cada participante se le mostrarán mezclados.</p>
@@ -168,6 +183,41 @@ const Tipos = (() => {
     return '';
   }
 
+  // Pines numerados (y zona circular opcional) de una pregunta "Zonas en imagen".
+  const marcasZonas = (p) => p.marcadores.map((m, i) => `
+    ${m.r ? `<span class="zona fija zm-zona" data-zm="${esc(m.id)}" style="left:${m.x}%;top:${m.y}%;width:${m.r * 2}%"></span>` : ''}
+    <span class="pin-num" data-zm="${esc(m.id)}" style="left:${m.x}%;top:${m.y}%">${i + 1}</span>`).join('');
+
+  function editorMarcador(m, i, examen) {
+    const corta = m.modo === 'corta';
+    return `
+      <div class="zm-item" data-mid="${esc(m.id)}">
+        <div class="zm-head">
+          <span class="pin-num static">${i + 1}</span>
+          <div class="zm-modo" role="group" aria-label="Tipo de respuesta">
+            <button type="button" class="${corta ? '' : 'sel'}" data-ta="zmModo" data-v="opciones">${ic('radio')} Opción múltiple</button>
+            <button type="button" class="${corta ? 'sel' : ''}" data-ta="zmModo" data-v="corta">${ic('texto')} Respuesta corta</button>
+          </div>
+          <label class="range-row zm-radio" title="Tamaño de la zona (0 = solo el punto)"><span>Zona</span><input type="range" min="0" max="20" step="1" data-t="zmRadio" value="${m.r || 0}"></label>
+          ${quitar('quitarMarcador')}
+        </div>
+        ${corta ? (examen
+          ? `<input class="opt-input boxed ok" data-t="zmAceptadas" value="${esc((m.aceptadas || []).join(' | '))}" placeholder="Respuesta correcta (varias: separa con |)">`
+          : '<div class="fake-input">El participante escribirá el nombre</div>')
+        : `<div class="opts">${(m.opciones || []).map((o) => {
+            const ok = examen && m.correcta === o.id;
+            return `
+              <div class="opt ${ok ? 'is-correct' : ''}" data-zo="${esc(o.id)}">
+                <button type="button" class="mark ${examen ? '' : 'off'}" data-ta="zmCorrecta" title="${examen ? 'Marcar como correcta' : ''}" ${examen ? '' : 'tabindex="-1"'}>${ic('check')}</button>
+                <input class="opt-input" data-t="zmOpcion" value="${esc(o.texto)}" placeholder="Opción">
+                ${ok ? '<span class="chip chip-ok">Correcta</span>' : ''}
+                ${m.opciones.length > 1 ? `<button type="button" class="icon-btn sm" data-ta="zmQuitarOpcion" aria-label="Quitar opción">${ic('x')}</button>` : ''}
+              </div>`;
+          }).join('')}</div>
+          <button type="button" class="link-btn" data-ta="zmAgregarOpcion">${ic('plus')} Agregar opción</button>`}
+      </div>`;
+  }
+
   const buscar = (lista, el, attr) => {
     const fila = el.closest(`[${attr}]`);
     return fila ? lista.find((x) => x.id === fila.getAttribute(attr)) : null;
@@ -189,6 +239,27 @@ const Tipos = (() => {
         Object.assign(p, parsearHuecos(v));
         const prev = t.closest('.q-card').querySelector('[data-prev]');
         if (prev) prev.innerHTML = previewHuecos(p);
+        break;
+      }
+      case 'zmAceptadas': buscar(p.marcadores, t, 'data-mid').aceptadas = v.split('|').map((x) => x.trim()).filter(Boolean); break;
+      case 'zmOpcion': {
+        const m = buscar(p.marcadores, t, 'data-mid');
+        const o = buscar(m.opciones, t, 'data-zo');
+        o.texto = v;
+        break;
+      }
+      case 'zmRadio': {
+        const m = buscar(p.marcadores, t, 'data-mid');
+        const card = t.closest('.q-card');
+        const antes = !!m.r;
+        m.r = Number(v);
+        if (antes !== !!m.r) {
+          // Aparece o desaparece el círculo: se vuelve a pintar solo la imagen.
+          card.querySelector('.img-stage').innerHTML = `<img src="${p.imagen}" alt="" draggable="false">${marcasZonas(p)}`;
+        } else {
+          const z = card.querySelector(`.zm-zona[data-zm="${CSS.escape(m.id)}"]`);
+          if (z) z.style.width = `${m.r * 2}%`;
+        }
         break;
       }
       case 'radioZona': {
@@ -239,10 +310,42 @@ const Tipos = (() => {
           const zona = e.target.closest('.zona');
           if (zona) p.zonas.splice(Number(zona.dataset.zi), 1);
           else p.zonas.push(Object.assign(posicion(e, b), { r: p.zonas.length ? p.zonas[0].r : 8 }));
+        } else if (p.tipo === 'zonasImagen') {
+          if (e.target.closest('.pin-num')) return false;
+          p.marcadores.push(Object.assign({
+            id: uid(), r: 0, modo: 'opciones', correcta: '', aceptadas: [],
+            opciones: [{ id: uid(), texto: 'Opción 1' }, { id: uid(), texto: 'Opción 2' }]
+          }, posicion(e, b)));
         } else {
           if (e.target.closest('.pin-num')) return false;
           p.marcadores.push(Object.assign({ id: uid(), texto: '' }, posicion(e, b)));
         }
+        break;
+      }
+      case 'zmModo': {
+        const m = buscar(p.marcadores, b, 'data-mid');
+        m.modo = b.dataset.v;
+        if (!m.opciones || !m.opciones.length) m.opciones = [{ id: uid(), texto: 'Opción 1' }, { id: uid(), texto: 'Opción 2' }];
+        m.aceptadas = m.aceptadas || [];
+        break;
+      }
+      case 'zmCorrecta': {
+        if (!examen) return false;
+        const m = buscar(p.marcadores, b, 'data-mid');
+        const oid = b.closest('[data-zo]').dataset.zo;
+        m.correcta = m.correcta === oid ? '' : oid;
+        break;
+      }
+      case 'zmAgregarOpcion': {
+        const m = buscar(p.marcadores, b, 'data-mid');
+        m.opciones.push({ id: uid(), texto: `Opción ${m.opciones.length + 1}` });
+        break;
+      }
+      case 'zmQuitarOpcion': {
+        const m = buscar(p.marcadores, b, 'data-mid');
+        const oid = b.closest('[data-zo]').dataset.zo;
+        m.opciones = m.opciones.filter((o) => o.id !== oid);
+        if (m.correcta === oid) m.correcta = '';
         break;
       }
       case 'quitarMarcador': p.marcadores = p.marcadores.filter((m) => m !== buscar(p.marcadores, b, 'data-mid')); break;
@@ -274,6 +377,15 @@ const Tipos = (() => {
             ${p.marcadores.map((m, i) => `<span class="pin-num" style="left:${m.x}%;top:${m.y}%">${i + 1}</span>`).join('')}</div>
           <div class="label-grid">${p.marcadores.map((m, i) => `
             <label class="label-row"><span class="pin-num static">${i + 1}</span>${selectHtml(p.banco, `data-marcador="${esc(m.id)}" aria-label="Etiqueta del punto ${i + 1}"`)}</label>`).join('')}</div>`;
+      case 'zonasImagen':
+        return `<div class="img-stage" data-stage-zm><img src="${p.imagen}" alt="" draggable="false">${marcasZonas(p)}</div>
+          <div class="zm-answers">${p.marcadores.map((m, i) => `
+            <label class="label-row zm-answer" data-zm="${esc(m.id)}">
+              <span class="pin-num static">${i + 1}</span>
+              ${m.modo === 'corta'
+                ? `<input class="answer-input" data-zona="${esc(m.id)}" autocomplete="off" placeholder="Escribe el nombre" aria-label="Respuesta del punto ${i + 1}">`
+                : `<span class="select full"><select data-zona="${esc(m.id)}" aria-label="Respuesta del punto ${i + 1}"><option value="">Elige…</option>${(m.opciones || []).map((o) => `<option value="${esc(o.id)}">${esc(o.texto)}</option>`).join('')}</select>${ic('down', 'chev')}</span>`}
+            </label>`).join('')}</div>`;
       case 'ordenar':
         return `<p class="hint">${ic('grip')} Arrastra los elementos (o usa las flechas) para ponerlos en orden.</p>
           <ol class="sort-list" data-sort>${p.elementos.map((e) => `
@@ -320,6 +432,12 @@ const Tipos = (() => {
       });
     }
     if (p.tipo === 'ordenar') montarOrden(card, limpiar);
+    if (p.tipo === 'zonasImagen') {
+      const resaltar = (id, si) => card.querySelectorAll(`.img-stage [data-zm="${CSS.escape(id)}"]`).forEach((el) => el.classList.toggle('activo', si));
+      card.addEventListener('focusin', (e) => { const r = e.target.closest('.zm-answer'); if (r) resaltar(r.dataset.zm, true); });
+      card.addEventListener('focusout', (e) => { const r = e.target.closest('.zm-answer'); if (r) resaltar(r.dataset.zm, false); });
+      card.addEventListener('change', limpiar);
+    }
     if (p.tipo === 'relacionar') montarRelacion(card, p, limpiar);
     if (p.tipo === 'huecos') {
       card.querySelectorAll('.cloze-input').forEach((i) => {
@@ -465,6 +583,11 @@ const Tipos = (() => {
         card.querySelectorAll('[data-marcador]').forEach((s) => { if (s.value) r[s.dataset.marcador] = s.value; });
         return r;
       }
+      case 'zonasImagen': {
+        const r = {};
+        card.querySelectorAll('[data-zona]').forEach((el) => { if (el.value.trim()) r[el.dataset.zona] = el.value.trim(); });
+        return r;
+      }
       case 'ordenar': return [...card.querySelectorAll('.sort-item')].map((li) => li.dataset.id);
       case 'relacionar': return Object.assign({}, card._resp || {});
       case 'huecos': return [...card.querySelectorAll('[data-hueco]')].map((i) => i.value.trim());
@@ -484,8 +607,8 @@ const Tipos = (() => {
       </div>${r && r.x != null ? '' : '<p class="muted">Sin respuesta</p>'}`;
     }
     const filas = desglose(p, r) || [];
-    const figura = p.tipo === 'etiquetarImagen' && p.imagen
-      ? `<div class="img-stage mini"><img src="${p.imagen}" alt="" draggable="false">${(p.marcadores || []).map((m, i) => `<span class="pin-num" style="left:${m.x}%;top:${m.y}%">${i + 1}</span>`).join('')}</div>` : '';
+    const figura = (p.tipo === 'etiquetarImagen' || p.tipo === 'zonasImagen') && p.imagen
+      ? `<div class="img-stage mini"><img src="${p.imagen}" alt="" draggable="false">${p.tipo === 'zonasImagen' ? marcasZonas(p) : (p.marcadores || []).map((m, i) => `<span class="pin-num" style="left:${m.x}%;top:${m.y}%">${i + 1}</span>`).join('')}</div>` : '';
     return `${figura}<div class="dg">${filas.map((f) => {
       const est = f.ok === null ? '' : f.ok ? 'ok' : 'bad';
       return `<div class="dg-row ${est}">

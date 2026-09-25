@@ -10,7 +10,8 @@ Portal para capacitadores estilo Microsoft Forms: inicias sesión, ves tus formu
 
 - Login y registro de capacitadores.
 - Panel "Mis formularios" con búsqueda, duplicar, compartir y eliminar.
-- Editor con autoguardado y 11 tipos de pregunta (ver abajo).
+- Editor con autoguardado y 12 tipos de pregunta (ver abajo).
+- Imagen de apoyo opcional en **cualquier** pregunta (arriba o al lado del enunciado; se amplía al tocarla).
 - Pestaña **Diseño**: 5 composiciones (Clásica, Portada, Lateral, Paso a paso, Minimalista), 12 plantillas (oscuras y claras), 12 tipos de letra, 4 tamaños, color de acento e imagen de encabezado.
 - Aviso automático en el panel si tu base de datos de Supabase necesita actualizarse (con botón para copiar el SQL).
 - Exámenes: puntos por pregunta, respuestas correctas, calificación aprobatoria y calificación automática **en el servidor** (quien responde nunca ve las respuestas correctas antes de enviar).
@@ -73,6 +74,7 @@ Interactivas (las compuestas dan **crédito parcial**):
 | `subrespuestas` | Un campo de texto por etiqueta | Proporción de campos correctos |
 | `puntoImagen` | Toca la imagen (se guarda x/y en %) | Correcto si cae dentro de alguna zona |
 | `etiquetarImagen` | Elige la etiqueta de cada punto numerado | Proporción de puntos correctos |
+| `zonasImagen` | Por cada punto numerado: elige una opción o escribe el nombre | Proporción de puntos correctos |
 | `ordenar` | Arrastra (o usa flechas) | Proporción de posiciones correctas |
 | `relacionar` | Líneas entre columnas (en celular, listas) | Proporción de pares correctos |
 | `huecos` | Escribe dentro del párrafo | Proporción de espacios correctos |
@@ -81,7 +83,8 @@ Los textos se comparan sin mayúsculas, acentos ni espacios extra. Quien respond
 
 ### Modelos de datos
 
-Cada pregunta comparte `{ id, tipo, texto, obligatoria, puntos }` y agrega:
+Cada pregunta comparte `{ id, tipo, texto, obligatoria, puntos }`, puede traer una imagen de apoyo
+`"apoyo": { "imagen": "data:image/jpeg;base64,...", "posicion": "arriba" | "lado" }` y agrega:
 
 ```jsonc
 // subrespuestas → respuesta: { "c1": "incendio", "c2": "humo" }
@@ -94,6 +97,13 @@ Cada pregunta comparte `{ id, tipo, texto, obligatoria, puntos }` y agrega:
 // etiquetarImagen → respuesta: { "k1": "Casco", "k2": "Guantes" }
 { "imagen": "...", "aspecto": 0.625,
   "marcadores": [{ "id": "k1", "x": 25, "y": 50, "texto": "Casco" }], "distractores": ["Botas"] }
+
+// zonasImagen → respuesta: { "z1": "o1", "z2": "mitocondria" }  (id de opción o texto)
+// r = radio de la zona en % del ancho (0 = solo el punto)
+{ "imagen": "...", "aspecto": 0.667, "marcadores": [
+  { "id": "z1", "x": 48, "y": 48, "r": 9, "modo": "opciones",
+    "opciones": [{ "id": "o1", "texto": "Núcleo" }, { "id": "o2", "texto": "Vacuola" }], "correcta": "o1" },
+  { "id": "z2", "x": 72, "y": 37, "r": 0, "modo": "corta", "aceptadas": ["Mitocondria", "mitocondrias"] } ] }
 
 // ordenar (guardado en el orden correcto) → respuesta: ["e1", "e2", "e3"]
 { "elementos": [{ "id": "e1", "texto": "Dar la alarma" }, { "id": "e2", "texto": "Evacuar" }] }

@@ -179,13 +179,23 @@
     });
   }
 
+  // Ampliar imágenes de apoyo.
+  const ampliar = (img) => modal(`
+      <button class="icon-btn modal-x" data-cerrar aria-label="Cerrar">${ic('x')}</button>
+      <img class="zoom-img" src="${img.src}" alt="${esc(img.alt)}">`, (el) => el.querySelector('.modal-card').classList.add('zoom'));
+  document.addEventListener('click', (e) => { const img = e.target.closest('[data-ampliar]'); if (img) ampliar(img); });
+  document.addEventListener('keydown', (e) => {
+    const img = e.target.closest && e.target.closest('[data-ampliar]');
+    if (img && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); ampliar(img); }
+  });
+
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.dropdown, .menu')) $$('.dropdown.open, .menu.open').forEach((m) => m.classList.remove('open'));
   });
 
   // ---------- Versión de la base de datos ----------
   // Si el capacitador no ha vuelto a ejecutar supabase.sql, los participantes no ven lo nuevo.
-  const VERSION_BD = 3;
+  const VERSION_BD = 4;
   let versionBd = null;
   let consultaVersion = null;
   async function avisoVersion() {
@@ -700,6 +710,16 @@
     }
     const p = preguntaDe(t);
     if (!p) return;
+    if (t.dataset.q === 'apoyoArchivo') {
+      leerImagen(t.files[0])
+        .then(({ dataUrl }) => {
+          p.apoyo = { imagen: dataUrl, posicion: (p.apoyo && p.apoyo.posicion) || 'arriba' };
+          pintarPreguntas();
+          programarGuardado();
+        })
+        .catch((err) => toast(err.message, 'err'));
+      return;
+    }
     if (t.dataset.t === 'imagen') {
       Tipos.change(t, p)
         .then((cambio) => { if (cambio) { pintarPreguntas(); programarGuardado(); } })
@@ -770,6 +790,10 @@
       const o = { id: uid(), texto: `Opción ${p.opciones.length + 1}` };
       p.opciones.push(o);
       enfocar = p.id + ':' + o.id;
+    } else if (accion === 'apoyoPos') {
+      p.apoyo.posicion = b.dataset.v;
+    } else if (accion === 'quitarApoyo') {
+      delete p.apoyo;
     } else if (accion === 'quitarOpcion') {
       const oid = b.closest('[data-oid]').dataset.oid;
       p.opciones = p.opciones.filter((x) => x.id !== oid);
@@ -853,9 +877,24 @@
             </select>
             ${ic('down', 'chev')}
           </label>
+          <label class="btn btn-ghost btn-sm apoyo-btn" title="Agregar una imagen a esta pregunta">${ic('image')}<span>${p.apoyo && p.apoyo.imagen ? 'Cambiar imagen' : 'Imagen'}</span>
+            <input type="file" accept="image/*" data-q="apoyoArchivo" hidden></label>
           ${examen && p.tipo !== 'parrafo' ? `<label class="pts"><input type="number" min="0" step="1" data-q="puntos" value="${Number(p.puntos) || 0}" aria-label="Puntos"><span>pts</span></label>` : ''}
         </div>
-        <textarea class="q-text" data-q="texto" rows="1" placeholder="Escribe la pregunta">${esc(p.texto)}</textarea>
+        ${p.apoyo && p.apoyo.imagen ? `
+          <div class="q-enunciado ${p.apoyo.posicion === 'lado' ? 'lado' : 'arriba'}">
+            <figure class="apoyo-edit">
+              <img src="${p.apoyo.imagen}" alt="Imagen de la pregunta">
+              <figcaption>
+                <span class="zm-modo" role="group" aria-label="Posición de la imagen">
+                  <button type="button" class="${p.apoyo.posicion === 'lado' ? '' : 'sel'}" data-qa="apoyoPos" data-v="arriba">Arriba</button>
+                  <button type="button" class="${p.apoyo.posicion === 'lado' ? 'sel' : ''}" data-qa="apoyoPos" data-v="lado">Al lado</button>
+                </span>
+                <button type="button" class="icon-btn sm danger" data-qa="quitarApoyo" aria-label="Quitar imagen">${ic('trash')}</button>
+              </figcaption>
+            </figure>
+            <textarea class="q-text" data-q="texto" rows="1" placeholder="Escribe la pregunta">${esc(p.texto)}</textarea>
+          </div>` : `<textarea class="q-text" data-q="texto" rows="1" placeholder="Escribe la pregunta">${esc(p.texto)}</textarea>`}
         <div class="q-body">${cuerpo}</div>
         <div class="q-foot">
           <span class="q-aviso">${avisoPregunta(p)}</span>
@@ -1296,13 +1335,18 @@
       } else {
         entrada = `<textarea class="answer-input" name="q_${esc(p.id)}" rows="3" placeholder="Tu respuesta"></textarea>`;
       }
-      return `
-        <section class="q-card public-q tipo-${esc(p.tipo)}" data-pid="${esc(p.id)}" style="--i:${i}">
+      const apoyo = p.apoyo && p.apoyo.imagen
+        ? `<figure class="q-apoyo"><img src="${p.apoyo.imagen}" alt="Imagen de la pregunta ${i + 1}" data-ampliar tabindex="0"><span class="q-apoyo-zoom">${ic('search')}</span></figure>` : '';
+      const lado = apoyo && p.apoyo.posicion === 'lado';
+      const cabeza = `
           <div class="pq-head">
             <span class="q-num">${i + 1}</span>
             <h3>${esc(p.texto || 'Pregunta')}${p.obligatoria ? '<span class="req">*</span>' : ''}</h3>
             ${p.puntos ? `<span class="chip">${p.puntos} pt${p.puntos === 1 ? '' : 's'}</span>` : ''}
-          </div>
+          </div>`;
+      return `
+        <section class="q-card public-q tipo-${esc(p.tipo)}" data-pid="${esc(p.id)}" style="--i:${i}">
+          ${lado ? `<div class="pq-lado">${apoyo}<div>${cabeza}</div></div>` : apoyo + cabeza}
           ${p.tipo === 'multiple' ? '<p class="hint">Selecciona todas las que apliquen.</p>' : ''}
           ${entrada}
           <p class="q-error">${ic('alert')} Esta pregunta es obligatoria.</p>
