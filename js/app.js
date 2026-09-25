@@ -1264,5 +1264,15 @@
 
   // ---------- Inicio ----------
   window.addEventListener('hashchange', render);
-  API.iniciar().finally(render);
+  // Regreso desde el correo de confirmación de Supabase: la liga trae datos en el hash.
+  const hashInicial = location.hash;
+  API.iniciar().finally(() => {
+    if (/access_token=|error_description=/.test(hashInicial)) {
+      const err = new URLSearchParams(hashInicial.replace(/^#\/?/, '')).get('error_description');
+      history.replaceState(null, '', location.pathname + '#/formularios');
+      if (err) toast('La liga de confirmación ya no es válida. Inicia sesión o regístrate de nuevo.', 'err');
+      else if (Sesion.usuario()) toast('¡Cuenta confirmada!');
+    }
+    render();
+  });
 })();

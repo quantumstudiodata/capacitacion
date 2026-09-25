@@ -65,7 +65,7 @@ const SupabaseBackend = (() => {
       const email = String(b.email || '').trim().toLowerCase();
       const nombre = String(b.nombre || '').trim();
       if (!nombre || !email || !b.password) throw new Error('Completa todos los campos');
-      const data = revisar(await sb().auth.signUp({ email, password: b.password, options: { data: { nombre } } }));
+      const data = revisar(await sb().auth.signUp({ email, password: b.password, options: { data: { nombre }, emailRedirectTo: location.origin + location.pathname } }));
       if (!data.session) {
         const e = new Error('Te enviamos un correo para confirmar tu cuenta. Confírmalo y luego inicia sesión.');
         e.info = true;
