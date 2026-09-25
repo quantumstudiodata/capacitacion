@@ -80,6 +80,11 @@ const SupabaseBackend = (() => {
       return { token: 'supabase', usuario: usuarioDe(data.user) };
     },
 
+    async version() {
+      const { data, error } = await sb().rpc('portal_version');
+      return error ? 0 : Number(data) || 0;
+    },
+
     async logout() {
       await sb().auth.signOut();
       return true;

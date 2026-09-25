@@ -35,7 +35,14 @@ const Diseno = (() => {
 
   const TAMANOS = { chico: { nombre: 'Chico', px: 14 }, normal: { nombre: 'Normal', px: 15.5 }, grande: { nombre: 'Grande', px: 17.5 }, enorme: { nombre: 'Muy grande', px: 19.5 } };
   const ACENTOS = ['#7c3aed', '#a855f7', '#c026d3', '#db2777', '#e11d48', '#f97316', '#eab308', '#059669', '#0891b2', '#2563eb', '#4f46e5', '#57534e'];
-  const BASE = { plantilla: 'aurora', fuente: 'Plus Jakarta Sans', tamano: 'normal', acento: '', encabezado: '' };
+  const COMPOSICIONES = {
+    clasica: { nombre: 'Clásica', desc: 'Encabezado y preguntas en tarjetas' },
+    portada: { nombre: 'Portada', desc: 'Encabezado grande a todo lo ancho' },
+    lateral: { nombre: 'Lateral', desc: 'Título fijo a la izquierda' },
+    pasos: { nombre: 'Paso a paso', desc: 'Una pregunta a la vez' },
+    minimal: { nombre: 'Minimalista', desc: 'Sin tarjetas, solo líneas' }
+  };
+  const BASE = { composicion: 'clasica', plantilla: 'aurora', fuente: 'Plus Jakarta Sans', tamano: 'normal', acento: '', encabezado: '' };
 
   const cargadas = new Set(['Plus Jakarta Sans']);
   function cargarFuentes(nombres) {
@@ -52,6 +59,7 @@ const Diseno = (() => {
   const normalizar = (d) => {
     const x = Object.assign({}, BASE, d || {});
     if (!PLANTILLAS[x.plantilla]) x.plantilla = BASE.plantilla;
+    if (!COMPOSICIONES[x.composicion]) x.composicion = BASE.composicion;
     if (!TAMANOS[x.tamano]) x.tamano = BASE.tamano;
     if (!FUENTES.some((f) => f.nombre === x.fuente)) x.fuente = BASE.fuente;
     if (x.acento && !/^#[0-9a-f]{6}$/i.test(x.acento)) x.acento = '';
@@ -96,6 +104,7 @@ const Diseno = (() => {
     const vars = variables(d);
     Object.entries(vars).forEach(([k, v]) => el.style.setProperty(k, v));
     el.dataset.modo = PLANTILLAS[d.plantilla].modo;
+    el.dataset.comp = d.composicion;
     document.documentElement.style.setProperty('--scroll-grad', vars['--grad']);
   }
 
@@ -103,5 +112,5 @@ const Diseno = (() => {
     document.documentElement.style.removeProperty('--scroll-grad');
   }
 
-  return { PLANTILLAS, FUENTES, TAMANOS, ACENTOS, BASE, normalizar, variables, aplicar, cargarFuentes, quitarDePagina };
+  return { COMPOSICIONES, PLANTILLAS, FUENTES, TAMANOS, ACENTOS, BASE, normalizar, variables, aplicar, cargarFuentes, quitarDePagina };
 })();

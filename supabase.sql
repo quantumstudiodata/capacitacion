@@ -374,6 +374,11 @@ begin
 end;
 $$;
 
+-- Versión del esquema: el portal avisa al capacitador si su base de datos está desactualizada.
+create or replace function public.portal_version() returns int
+language sql immutable as $$ select 3 $$;
+
+grant execute on function public.portal_version() to anon, authenticated;
 revoke all on function public.formulario_publico(uuid, boolean) from public;
 revoke all on function public.enviar_respuesta(uuid, text, text, jsonb, boolean) from public;
 grant execute on function public.formulario_publico(uuid, boolean) to anon, authenticated;

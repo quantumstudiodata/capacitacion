@@ -133,6 +133,9 @@ const LocalBackend = (() => {
     logout() {
       return true;
     },
+    version() {
+      return 99;
+    },
     deleteResponse(b) {
       const db = leer();
       const u = usuarioDe(db, b.token);

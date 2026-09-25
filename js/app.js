@@ -129,7 +129,7 @@
     t.style.height = t.scrollHeight + 'px';
   }
 
-  async function copiar(texto) {
+  async function copiar(texto, mensaje = 'Liga copiada') {
     try {
       await navigator.clipboard.writeText(texto);
     } catch (e) {
@@ -140,7 +140,7 @@
       document.execCommand('copy');
       t.remove();
     }
-    toast('Liga copiada');
+    toast(mensaje);
   }
 
   const logo = () => `<div class="brand">${'<span class="brand-mark">' + ic('check') + '</span>'}<span class="brand-name">${esc(window.CONFIG.NOMBRE)}</span></div>`;
@@ -182,6 +182,54 @@
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.dropdown, .menu')) $$('.dropdown.open, .menu.open').forEach((m) => m.classList.remove('open'));
   });
+
+  // ---------- Versión de la base de datos ----------
+  // Si el capacitador no ha vuelto a ejecutar supabase.sql, los participantes no ven lo nuevo.
+  const VERSION_BD = 3;
+  let versionBd = null;
+  let consultaVersion = null;
+  async function avisoVersion() {
+    if (versionBd === null) {
+      consultaVersion = consultaVersion || API.call('version')
+        .then((v) => { versionBd = v; })
+        .catch(() => {})
+        .finally(() => { consultaVersion = null; });
+      await consultaVersion;
+      if (versionBd === null) return;
+    }
+    const main = $('main.container');
+    if (versionBd >= VERSION_BD || !main || $('.db-alert')) return;
+    const ref = (window.CONFIG.SUPABASE_URL.match(/https:\/\/([^.]+)\./) || [])[1] || '';
+    main.insertAdjacentHTML('afterbegin', `
+      <section class="db-alert">
+        <span class="db-alert-ic">${ic('alert')}</span>
+        <div class="db-alert-txt">
+          <strong>Actualiza tu base de datos de Supabase</strong>
+          <p>Tus participantes no verán los diseños ni los tipos de pregunta nuevos hasta que vuelvas a ejecutar <code>supabase.sql</code>. No se borra nada.</p>
+          <ol><li>Copia el SQL.</li><li>Ábrelo en Supabase → SQL Editor, pégalo y presiona <b>Run</b>.</li><li>Regresa y presiona “Ya lo ejecuté”.</li></ol>
+        </div>
+        <div class="db-alert-btns">
+          <button class="btn btn-primary btn-sm" id="copiarSql">${ic('copy')} Copiar SQL</button>
+          ${ref ? `<a class="btn btn-ghost btn-sm" href="https://supabase.com/dashboard/project/${ref}/sql/new" target="_blank" rel="noopener">${ic('external')} Abrir Supabase</a>` : ''}
+          <button class="btn btn-ghost btn-sm" id="yaSql">${ic('check')} Ya lo ejecuté</button>
+        </div>
+      </section>`);
+    $('#copiarSql').addEventListener('click', async () => {
+      try {
+        const r = await fetch(`supabase.sql?t=${Date.now()}`, { cache: 'no-store' });
+        if (!r.ok) throw new Error();
+        await copiar(await r.text(), 'SQL copiado. Pégalo en Supabase y presiona Run.');
+      } catch (e) { toast('No se pudo copiar el SQL. Ábrelo desde el repositorio.', 'err'); }
+    });
+    $('#yaSql').addEventListener('click', async () => {
+      versionBd = null;
+      try { versionBd = await API.call('version'); } catch (e) { versionBd = 0; }
+      if (versionBd >= VERSION_BD) {
+        $('.db-alert').remove();
+        toast('¡Listo! Tu base de datos está actualizada.');
+      } else toast('Todavía no se detecta la actualización. Revisa que el SQL se haya ejecutado sin errores.', 'err');
+    });
+  }
 
   // ---------- Router ----------
   let renderId = 0;
@@ -352,6 +400,7 @@
     enlazarTopbar();
 
     $$('[data-crear]').forEach((b) => b.addEventListener('click', () => crearForm(b.dataset.crear, b)));
+    avisoVersion();
     $('#buscar').addEventListener('input', pintarLista);
 
     try {
@@ -592,6 +641,7 @@
     $('#btnPreview').addEventListener('click', () => guardarSiHayCambios());
 
     const cuerpo = $('#editorBody');
+    avisoVersionEditor();
     if (tab === 'preguntas') pintarPreguntas();
     else if (tab === 'configuracion') pintarConfig();
     else if (tab === 'diseno') pintarDiseno();
@@ -848,7 +898,27 @@
     window.scrollTo(0, scroll);
   }
 
+  // El aviso vive fuera de #editorBody para que no lo borre el cambio de pestaña.
+  function avisoVersionEditor() {
+    const body = $('#editorBody');
+    const host = document.createElement('main');
+    host.className = 'container narrow db-host';
+    body.parentNode.insertBefore(host, body);
+    avisoVersion().then(() => { if (!host.children.length) host.remove(); });
+  }
+
   // ---------- Diseño ----------
+  function miniComposicion(k) {
+    const cards = (n) => '<i class="c-card"></i>'.repeat(n);
+    switch (k) {
+      case 'portada': return `<i class="c-hero big"></i><span class="c-col">${cards(2)}</span>`;
+      case 'lateral': return `<span class="c-row"><i class="c-hero side"></i><span class="c-col">${cards(3)}</span></span>`;
+      case 'pasos': return `<i class="c-bar"></i><i class="c-card solo"></i><span class="c-dots"><i></i><i></i><i></i></span>`;
+      case 'minimal': return `<i class="c-title"></i><i class="c-line"></i><i class="c-line"></i><i class="c-line"></i>`;
+      default: return `<i class="c-hero"></i><span class="c-col">${cards(3)}</span>`;
+    }
+  }
+
   function pintarDiseno() {
     const f = E.form;
     const d = f.diseno;
@@ -858,6 +928,17 @@
     $('#editorBody').innerHTML = `
       <div class="design-layout" id="disenoRoot">
         <div class="design-controls">
+          <section class="panel">
+            <h3>${ic('layers')} Composición</h3>
+            <p class="hint">Cómo se acomoda la página que ven tus participantes.</p>
+            <div class="comp-grid">
+              ${Object.entries(Diseno.COMPOSICIONES).map(([k, c]) => `
+                <button type="button" class="comp-opt ${sel('composicion', k)}" data-d="composicion" data-v="${k}">
+                  <span class="cmini cmini-${k}" aria-hidden="true">${miniComposicion(k)}</span>
+                  <strong>${c.nombre}</strong><small>${c.desc}</small>
+                </button>`).join('')}
+            </div>
+          </section>
           <section class="panel">
             <h3>${ic('palette')} Plantillas</h3>
             <p class="hint">Elige el estilo de la página que verán tus participantes.</p>
@@ -909,6 +990,7 @@
         <aside class="design-preview">
           <p class="eyebrow">Vista previa</p>
           <div class="public tema-preview" id="temaPreview">
+            ${d.composicion === 'pasos' ? '<div class="pasos-top"><span>Paso 1 de ' + Math.max(1, f.preguntas.length) + '</span><div class="paso-track"><span style="width:' + (100 / Math.max(1, f.preguntas.length)) + '%"></span></div></div>' : ''}
             <section class="pf-hero">
               <h1>${esc(f.titulo || 'Formulario')}</h1>
               ${f.descripcion ? `<p>${esc(f.descripcion)}</p>` : ''}
@@ -1181,6 +1263,10 @@
       if (rid !== renderId) return;
       return pintarPublico(`<div class="result-card">${ic('alert', 'big muted')}<h2>No disponible</h2><p class="muted">${esc(err.message)}</p></div>`);
     }
+    // En vista previa el dueño ve siempre su diseño más reciente.
+    if (preview && Sesion.usuario() && !form.cerrado) {
+      try { form.diseno = (await API.call('getForm', { id })).diseno; } catch (e) { /* se usa el público */ }
+    }
     if (rid !== renderId) return;
     document.title = `${form.titulo || 'Formulario'} · ${window.CONFIG.NOMBRE}`;
     if (form.cerrado) {
@@ -1190,6 +1276,8 @@
     const preguntas = form.config.mezclarPreguntas ? mezclar(form.preguntas.slice()) : form.preguntas;
     const total = preguntas.reduce((s, p) => s + (Number(p.puntos) || 0), 0);
     const hayObligatorias = preguntas.some((p) => p.obligatoria) || form.config.pedirNombre || form.config.pedirCorreo;
+    const pideDatos = form.config.pedirNombre || form.config.pedirCorreo;
+    const enPasos = Diseno.normalizar(form.diseno).composicion === 'pasos' && preguntas.length + (pideDatos ? 1 : 0) > 1;
 
     const campo = (p, i) => {
       let entrada;
@@ -1222,6 +1310,7 @@
     };
 
     pintarPublico(`
+      <div class="pf-layout">
       <section class="pf-hero">
         <h1>${esc(form.titulo || 'Formulario')}</h1>
         ${form.descripcion ? `<p>${esc(form.descripcion).replace(/\n/g, '<br>')}</p>` : ''}
@@ -1231,6 +1320,8 @@
         </div>
         ${hayObligatorias ? '<p class="req-note"><span class="req">*</span> Obligatorio</p>' : ''}
       </section>
+      <div class="pf-main">
+      ${enPasos ? '<div class="pasos-top"><span id="pasoTexto"></span><div class="paso-track"><span id="pasoBarra"></span></div></div>' : ''}
       <form id="pf" novalidate>
         ${form.config.pedirNombre || form.config.pedirCorreo ? `
           <section class="q-card public-q" data-pid="__datos">
@@ -1240,9 +1331,13 @@
           </section>` : ''}
         ${preguntas.map(campo).join('')}
         <div class="pf-actions">
+          ${enPasos ? `<button type="button" class="btn btn-ghost btn-lg" id="btnAnterior">${ic('back')} Anterior</button><span class="pf-spacer"></span>
+          <button type="button" class="btn btn-primary btn-lg" id="btnSiguiente">Siguiente ${ic('back', 'flip')}</button>` : ''}
           <button class="btn btn-primary btn-lg" id="btnEnviar">Enviar respuestas</button>
         </div>
-      </form>`, preview, form.diseno);
+      </form>
+      </div>
+      </div>`, preview, form.diseno);
 
     const tarjeta = (p) => $(`[data-pid="${CSS.escape(p.id)}"]`);
     preguntas.filter((p) => Tipos.es(p.tipo)).forEach((p) => Tipos.montar(tarjeta(p), p));
@@ -1251,8 +1346,7 @@
       const card = e.target.closest('.public-q');
       if (card) card.classList.remove('invalid');
     });
-    formEl.addEventListener('submit', async (e) => {
-      e.preventDefault();
+    const recolectar = () => {
       const respuestas = {};
       const invalidas = [];
       preguntas.forEach((p) => {
@@ -1269,9 +1363,51 @@
       const nombre = formEl.elements.nombre ? formEl.elements.nombre.value.trim() : '';
       const correo = formEl.elements.correo ? formEl.elements.correo.value.trim() : '';
       if ((form.config.pedirNombre && !nombre) || (form.config.pedirCorreo && !/^\S+@\S+\.\S+$/.test(correo))) invalidas.unshift('__datos');
+      return { respuestas, invalidas, nombre, correo };
+    };
 
+    // Composición "Paso a paso": una pregunta a la vez.
+    const tarjetas = $$('.public-q', formEl);
+    let paso = 0;
+    const irA = (k) => {
+      paso = Math.max(0, Math.min(tarjetas.length - 1, k));
+      tarjetas.forEach((c, i) => { c.hidden = i !== paso; });
+      const actual = tarjetas[paso];
+      actual.classList.remove('entra');
+      void actual.offsetWidth;
+      actual.classList.add('entra');
+      $('#pasoTexto').textContent = `Paso ${paso + 1} de ${tarjetas.length}`;
+      $('#pasoBarra').style.width = `${(paso + 1) / tarjetas.length * 100}%`;
+      $('#btnAnterior').style.visibility = paso === 0 ? 'hidden' : '';
+      $('#btnSiguiente').hidden = paso === tarjetas.length - 1;
+      $('#btnEnviar').hidden = paso !== tarjetas.length - 1;
+      window.dispatchEvent(new Event('resize'));
+      const foco = actual.querySelector('input:not([type=radio]):not([type=checkbox]), textarea');
+      if (foco && matchMedia('(pointer: fine)').matches) foco.focus({ preventScroll: true });
+    };
+    const siguiente = () => {
+      const actual = tarjetas[paso];
+      if (recolectar().invalidas.includes(actual.dataset.pid)) {
+        actual.classList.remove('invalid');
+        void actual.offsetWidth;
+        actual.classList.add('invalid');
+        return;
+      }
+      irA(paso + 1);
+    };
+    if (enPasos) {
+      $('#btnAnterior').addEventListener('click', () => irA(paso - 1));
+      $('#btnSiguiente').addEventListener('click', siguiente);
+      irA(0);
+    }
+
+    formEl.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (enPasos && paso < tarjetas.length - 1) return siguiente();
+      const { respuestas, invalidas, nombre, correo } = recolectar();
       $$('.public-q').forEach((c) => c.classList.toggle('invalid', invalidas.includes(c.dataset.pid)));
       if (invalidas.length) {
+        if (enPasos) return irA(tarjetas.findIndex((c) => c.dataset.pid === invalidas[0]));
         $(`[data-pid="${CSS.escape(invalidas[0])}"]`).scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }

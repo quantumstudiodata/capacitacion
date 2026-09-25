@@ -11,7 +11,8 @@ Portal para capacitadores estilo Microsoft Forms: inicias sesión, ves tus formu
 - Login y registro de capacitadores.
 - Panel "Mis formularios" con búsqueda, duplicar, compartir y eliminar.
 - Editor con autoguardado y 11 tipos de pregunta (ver abajo).
-- Pestaña **Diseño**: 12 plantillas (oscuras y claras), 12 tipos de letra, 4 tamaños, color de acento e imagen de encabezado.
+- Pestaña **Diseño**: 5 composiciones (Clásica, Portada, Lateral, Paso a paso, Minimalista), 12 plantillas (oscuras y claras), 12 tipos de letra, 4 tamaños, color de acento e imagen de encabezado.
+- Aviso automático en el panel si tu base de datos de Supabase necesita actualizarse (con botón para copiar el SQL).
 - Exámenes: puntos por pregunta, respuestas correctas, calificación aprobatoria y calificación automática **en el servidor** (quien responde nunca ve las respuestas correctas antes de enviar).
 - Liga pública para responder (sin cuenta), vista previa, abrir/cerrar respuestas.
 - Resultados: estadísticas, respuestas individuales, resumen por pregunta y exportación a CSV.
@@ -105,7 +106,7 @@ Cada pregunta comparte `{ id, tipo, texto, obligatoria, puntos }` y agrega:
 ```
 
 El diseño del formulario se guarda en `diseno`:
-`{ "plantilla": "galaxia", "fuente": "Poppins", "tamano": "grande", "acento": "#db2777", "encabezado": "data:image/..." }`.
+`{ "composicion": "pasos", "plantilla": "galaxia", "fuente": "Poppins", "tamano": "grande", "acento": "#db2777", "encabezado": "data:image/..." }`.
 
 ## Reglas de calificación
 
