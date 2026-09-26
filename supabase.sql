@@ -52,8 +52,9 @@ create policy "capacitador borra sus respuestas" on public.respuestas
   using (exists (select 1 from public.formularios f where f.id = form_id and f.owner = auth.uid()));
 
 -- ---------- Calificación ----------
--- Mismas reglas que js/calificacion.js. Tipos: unica, multiple, vf, corta, parrafo,
--- subrespuestas, puntoImagen, etiquetarImagen, zonasImagen, ordenar, relacionar, huecos.
+-- Mismas reglas que js/calificacion.js. Tipos: unica, multiple, vf, menu, corta, parrafo,
+-- subrespuestas, puntoImagen, etiquetarImagen, zonasImagen, ordenar, relacionar, huecos,
+-- escala, numero, lineaNumerica.
 -- Cualquier pregunta puede traer una imagen de apoyo: { "apoyo": { "imagen": "data:...", "posicion": "arriba" | "lado" } }.
 
 create or replace function public._normalizar(t text) returns text
@@ -93,8 +94,16 @@ $$;
 create or replace function public._zona_calificable(m jsonb) returns boolean
 language sql immutable set search_path = public as $$
   select case when m->>'modo' = 'corta'
-    then exists (select 1 from jsonb_array_elements_text(coalesce(m->'aceptadas', '[]')) a where trim(a) <> '')
+    then not _bool(m->'manual') and exists (select 1 from jsonb_array_elements_text(coalesce(m->'aceptadas', '[]')) a where trim(a) <> '')
     else _texto(m->'correcta') <> '' end
+$$;
+
+-- Un campo de "Párrafo con sub-respuestas" se califica según su modo (abierta/única/múltiple/menú).
+create or replace function public._campo_calificable(c jsonb) returns boolean
+language sql immutable set search_path = public as $$
+  select case when coalesce(c->>'modo', 'abierta') = 'abierta'
+    then not _bool(c->'manual') and exists (select 1 from jsonb_array_elements_text(coalesce(c->'aceptadas', '[]')) a where trim(a) <> '')
+    else jsonb_array_length(coalesce(c->'correctas', '[]')) > 0 end
 $$;
 
 create or replace function public._calificable(p jsonb) returns boolean
@@ -104,9 +113,9 @@ language sql immutable set search_path = public as $$
     when 'corta' then exists (
       select 1 from jsonb_array_elements_text(coalesce(p->'respuestasAceptadas', '[]')) a where trim(a) <> '')
     when 'subrespuestas' then exists (
-      select 1 from jsonb_array_elements(coalesce(p->'campos', '[]')) c,
-        jsonb_array_elements_text(coalesce(c->'aceptadas', '[]')) a where trim(a) <> '')
-    when 'puntoImagen' then _texto(p->'imagen') <> '' and jsonb_array_length(coalesce(p->'zonas', '[]')) > 0
+      select 1 from jsonb_array_elements(coalesce(p->'campos', '[]')) c where _campo_calificable(c))
+    when 'puntoImagen' then coalesce(p->>'modo', 'automatico') = 'automatico'
+      and _texto(p->'imagen') <> '' and jsonb_array_length(coalesce(p->'zonas', '[]')) > 0
     when 'etiquetarImagen' then exists (
       select 1 from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m where _texto(m->'texto') <> '')
     when 'zonasImagen' then exists (
@@ -114,6 +123,10 @@ language sql immutable set search_path = public as $$
     when 'ordenar' then jsonb_array_length(coalesce(p->'elementos', '[]')) >= 2
     when 'relacionar' then jsonb_array_length(coalesce(p->'pares', '[]')) >= 1
     when 'huecos' then jsonb_array_length(coalesce(p->'huecos', '[]')) > 0
+    when 'escala' then _texto(p->'correcta') <> ''
+    when 'numero' then case when p->>'modoRespuesta' = 'rango'
+      then _texto(p->'minimo') <> '' and _texto(p->'maximo') <> '' else _texto(p->'valor') <> '' end
+    when 'lineaNumerica' then _texto(p->'valor') <> ''
     else jsonb_array_length(coalesce(p->'correctas', '[]')) > 0
   end
 $$;
@@ -129,7 +142,7 @@ declare
 begin
   if t = 'multiple' then
     return case when jsonb_typeof(r) = 'array' and r @> (p->'correctas') and (p->'correctas') @> r then 1 else 0 end;
-  elsif t in ('unica', 'vf') then
+  elsif t in ('unica', 'vf', 'menu') then
     return case when jsonb_typeof(r) = 'string' and (p->'correctas') ? (r #>> '{}') then 1 else 0 end;
   elsif t = 'corta' then
     return case when jsonb_typeof(r) = 'string' and _coincide(r #>> '{}', p->'respuestasAceptadas') then 1 else 0 end;
@@ -143,10 +156,14 @@ begin
       where sqrt(power((r->>'x')::numeric - (z->>'x')::numeric, 2) + power(((r->>'y')::numeric - (z->>'y')::numeric) * asp, 2)) <= (z->>'r')::numeric
     ) then 1 else 0 end;
   elsif t = 'subrespuestas' then
-    select count(*), count(*) filter (where jsonb_typeof(r) = 'object' and _coincide(r->>(c->>'id'), c->'aceptadas'))
+    select count(*), count(*) filter (where jsonb_typeof(r) = 'object' and case coalesce(c->>'modo', 'abierta')
+        when 'abierta' then _coincide(r->>(c->>'id'), c->'aceptadas')
+        when 'multiple' then jsonb_typeof(r->(c->>'id')) = 'array' and (r->(c->>'id')) @> (c->'correctas') and (c->'correctas') @> (r->(c->>'id'))
+        else jsonb_typeof(r->(c->>'id')) = 'string' and (c->'correctas') ? (r->(c->>'id') #>> '{}')
+      end)
       into total, buenos
       from jsonb_array_elements(coalesce(p->'campos', '[]')) c
-      where exists (select 1 from jsonb_array_elements_text(coalesce(c->'aceptadas', '[]')) a where trim(a) <> '');
+      where _campo_calificable(c);
   elsif t = 'etiquetarImagen' then
     select count(*), count(*) filter (where jsonb_typeof(r) = 'object' and _coincide(r->>(m->>'id'), jsonb_build_array(m->'texto')))
       into total, buenos
@@ -171,6 +188,28 @@ begin
     select count(*), count(*) filter (where jsonb_typeof(r) = 'array' and _coincide(r->>(i - 1)::int, h))
       into total, buenos
       from jsonb_array_elements(coalesce(p->'huecos', '[]')) with ordinality as x (h, i);
+  elsif t = 'escala' then
+    return case when _texto(p->'correcta') <> '' and _texto(r) = _texto(p->'correcta') then 1 else 0 end;
+  elsif t = 'numero' then
+    begin
+      if p->>'modoRespuesta' = 'rango' then
+        return case when _texto(p->'minimo') <> '' and _texto(p->'maximo') <> ''
+          and _texto(r)::numeric >= (p->>'minimo')::numeric and _texto(r)::numeric <= (p->>'maximo')::numeric
+          then 1 else 0 end;
+      else
+        return case when _texto(p->'valor') <> ''
+          and abs(_texto(r)::numeric - (p->>'valor')::numeric) <= coalesce((p->>'tolerancia')::numeric, 0)
+          then 1 else 0 end;
+      end if;
+    exception when others then return 0;
+    end;
+  elsif t = 'lineaNumerica' then
+    begin
+      return case when _texto(p->'valor') <> ''
+        and abs(_texto(r)::numeric - (p->>'valor')::numeric) <= coalesce((p->>'tolerancia')::numeric, 0)
+        then 1 else 0 end;
+    exception when others then return 0;
+    end;
   else
     return 0;
   end if;
@@ -183,13 +222,16 @@ create or replace function public._clave(p jsonb) returns jsonb
 language sql immutable as $$
   select case p->>'tipo'
     when 'corta' then coalesce(p->'respuestasAceptadas', '[]')
-    when 'subrespuestas' then (select coalesce(jsonb_object_agg(c->>'id', coalesce(c->'aceptadas', '[]')), '{}')
-      from jsonb_array_elements(coalesce(p->'campos', '[]')) c)
+    when 'subrespuestas' then (select coalesce(jsonb_object_agg(c->>'id', jsonb_build_object(
+        'modo', coalesce(c->'modo', '"abierta"'),
+        'aceptadas', case when coalesce(c->>'modo', 'abierta') = 'abierta' and not _bool(c->'manual') then coalesce(c->'aceptadas', '[]') else '[]'::jsonb end,
+        'correctas', case when coalesce(c->>'modo', 'abierta') = 'abierta' then '[]'::jsonb else coalesce(c->'correctas', '[]') end
+      )), '{}') from jsonb_array_elements(coalesce(p->'campos', '[]')) c)
     when 'puntoImagen' then coalesce(p->'zonas', '[]')
     when 'etiquetarImagen' then (select coalesce(jsonb_object_agg(m->>'id', coalesce(m->'texto', '""')), '{}')
       from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m)
     when 'zonasImagen' then (select coalesce(jsonb_object_agg(m->>'id', case
-        when m->>'modo' = 'corta' then coalesce(m->'aceptadas', '[]')
+        when m->>'modo' = 'corta' then (case when _bool(m->'manual') then '[]'::jsonb else coalesce(m->'aceptadas', '[]') end)
         when _texto(m->'correcta') <> '' then jsonb_build_array(m->'correcta')
         else '[]'::jsonb end), '{}')
       from jsonb_array_elements(coalesce(p->'marcadores', '[]')) m)
@@ -198,6 +240,10 @@ language sql immutable as $$
     when 'relacionar' then (select coalesce(jsonb_object_agg(q->>'id', q->'derecha'), '{}')
       from jsonb_array_elements(coalesce(p->'pares', '[]')) q)
     when 'huecos' then coalesce(p->'huecos', '[]')
+    when 'escala' then coalesce(p->'correcta', '""')
+    when 'numero' then jsonb_build_object('modoRespuesta', p->'modoRespuesta', 'valor', coalesce(p->'valor', '""'),
+      'minimo', coalesce(p->'minimo', '""'), 'maximo', coalesce(p->'maximo', '""'), 'tolerancia', coalesce(p->'tolerancia', '0'))
+    when 'lineaNumerica' then jsonb_build_object('valor', coalesce(p->'valor', '""'), 'tolerancia', coalesce(p->'tolerancia', '0'))
     else coalesce(p->'correctas', '[]')
   end
 $$;
@@ -233,7 +279,12 @@ begin
   case p->>'tipo'
     when 'subrespuestas' then
       base := base || jsonb_build_object('campos', coalesce((
-        select jsonb_agg(jsonb_build_object('id', c->'id', 'etiqueta', c->'etiqueta') order by i)
+        select jsonb_agg(jsonb_build_object(
+          'id', c->'id', 'etiqueta', c->'etiqueta', 'modo', coalesce(c->'modo', '"abierta"'),
+          'opciones', case when coalesce(c->>'modo', 'abierta') = 'abierta' then '[]'::jsonb else coalesce((
+            select jsonb_agg(jsonb_build_object('id', o->'id', 'texto', o->'texto') order by oi)
+            from jsonb_array_elements(coalesce(c->'opciones', '[]')) with ordinality as z (o, oi)), '[]') end
+        ) order by i)
         from jsonb_array_elements(coalesce(p->'campos', '[]')) with ordinality as x (c, i)), '[]'));
     when 'puntoImagen' then
       base := base || jsonb_build_object('imagen', coalesce(p->'imagen', '""'), 'aspecto', coalesce(p->'aspecto', '1'));
@@ -276,6 +327,17 @@ begin
                                     where jsonb_typeof(q->'derecha') = 'string'), '[]') || coalesce(p->'distractores', '[]')));
     when 'huecos' then
       base := base || jsonb_build_object('segmentos', coalesce(p->'segmentos', '[""]'));
+    when 'escala' then
+      base := base || jsonb_build_object(
+        'modo', case when p->>'modo' = 'likert' then '"likert"'::jsonb else '"numerica"'::jsonb end,
+        'min', coalesce((p->>'min')::numeric, 1), 'max', coalesce((p->>'max')::numeric, 5),
+        'etiquetaMin', coalesce(p->'etiquetaMin', '""'), 'etiquetaMax', coalesce(p->'etiquetaMax', '""'));
+    when 'numero' then
+      base := base || jsonb_build_object('unidad', coalesce(p->'unidad', '""'), 'decimales', greatest(0, coalesce((p->>'decimales')::int, 0)));
+    when 'lineaNumerica' then
+      base := base || jsonb_build_object(
+        'min', coalesce((p->>'min')::numeric, 0), 'max', coalesce((p->>'max')::numeric, 100), 'paso', coalesce((p->>'paso')::numeric, 1),
+        'etiquetaMin', coalesce(p->'etiquetaMin', '""'), 'etiquetaMax', coalesce(p->'etiquetaMax', '""'));
     else
       null;
   end case;
@@ -438,7 +500,7 @@ grant execute on function public.mis_formularios() to authenticated;
 
 -- Versión del esquema: el portal avisa al capacitador si su base de datos está desactualizada.
 create or replace function public.portal_version() returns int
-language sql immutable as $$ select 5 $$;
+language sql immutable as $$ select 6 $$;
 
 grant execute on function public.portal_version() to anon, authenticated;
 revoke all on function public.formulario_publico(uuid, boolean) from public;

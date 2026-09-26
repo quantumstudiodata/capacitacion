@@ -8,18 +8,28 @@
     unica: { nombre: 'Opción única', icono: 'radio' },
     multiple: { nombre: 'Opción múltiple', icono: 'checkbox' },
     vf: { nombre: 'Verdadero / Falso', icono: 'toggle' },
+    menu: { nombre: 'Menú desplegable', icono: 'menu' },
     corta: { nombre: 'Respuesta corta', icono: 'texto' },
-    parrafo: { nombre: 'Párrafo', icono: 'parrafo' },
+    parrafo: { nombre: 'Respuesta larga', icono: 'parrafo' },
     ...Tipos.LISTA
   };
   const DESC_TIPOS = {
     unica: 'Elige una sola respuesta', multiple: 'Elige varias respuestas', vf: 'Verdadero o falso',
-    corta: 'Texto breve', parrafo: 'Respuesta larga', subrespuestas: 'Varios campos de texto',
-    puntoImagen: 'Tocar un punto en la imagen', etiquetarImagen: 'Nombrar puntos numerados',
+    menu: 'Elige una opción de una lista', corta: 'Texto breve con respuesta correcta', parrafo: 'Texto libre, sin calificar',
+    subrespuestas: 'Varios campos por completar', puntoImagen: 'Señalar un punto en la imagen', etiquetarImagen: 'Nombrar puntos numerados',
     zonasImagen: 'Opción o texto por punto', ordenar: 'Arrastrar en orden', relacionar: 'Unir dos columnas',
-    huecos: 'Completar el texto'
+    huecos: 'Completar espacios en el texto', escala: 'Escala numérica o de acuerdo (Likert)',
+    numero: 'Un valor numérico, con tolerancia', lineaNumerica: 'Marcar un valor sobre una línea'
   };
-  const esOpciones = (t) => t === 'unica' || t === 'multiple' || t === 'vf';
+  // Tipos que se editan como una lista de opciones (una sola marca correcta salvo "multiple").
+  const esOpciones = (t) => t === 'unica' || t === 'multiple' || t === 'vf' || t === 'menu';
+  // Enunciado sugerido según el tipo, para orientar a quien redacta la pregunta.
+  const PLACEHOLDER_TIPO = {
+    puntoImagen: 'Ej. Señala la salida de emergencia en la imagen',
+    zonasImagen: 'Ej. Identifica las estructuras señaladas en la imagen',
+    numero: 'Ej. ¿Cuál es el resultado de la concentración?',
+    lineaNumerica: 'Ej. Ubica el valor de pH sobre la línea'
+  };
 
   const CONFIG_BASE = {
     esExamen: true,
@@ -35,7 +45,7 @@
 
   function nuevaPregunta(tipo) {
     const p = { id: uid(), tipo, texto: '', obligatoria: true, puntos: 1, opciones: [], correctas: [], respuestasAceptadas: [] };
-    if (tipo === 'unica' || tipo === 'multiple') p.opciones = [{ id: uid(), texto: 'Opción 1' }, { id: uid(), texto: 'Opción 2' }];
+    if (tipo === 'unica' || tipo === 'multiple' || tipo === 'menu') p.opciones = [{ id: uid(), texto: 'Opción 1' }, { id: uid(), texto: 'Opción 2' }];
     if (tipo === 'vf') p.opciones = [{ id: 'v', texto: 'Verdadero' }, { id: 'f', texto: 'Falso' }];
     if (tipo === 'parrafo') p.puntos = 0;
     return Object.assign(p, Tipos.nueva(tipo));
@@ -48,12 +58,12 @@
     if (tipo === 'vf') {
       p.opciones = [{ id: 'v', texto: 'Verdadero' }, { id: 'f', texto: 'Falso' }];
       p.correctas = [];
-    } else if (tipo === 'unica' || tipo === 'multiple') {
+    } else if (tipo === 'unica' || tipo === 'multiple' || tipo === 'menu') {
       if (antes === 'vf' || !esOpciones(antes)) {
         p.opciones = [{ id: uid(), texto: 'Opción 1' }, { id: uid(), texto: 'Opción 2' }];
         p.correctas = [];
       }
-      if (tipo === 'unica') p.correctas = p.correctas.slice(0, 1);
+      if (tipo === 'unica' || tipo === 'menu') p.correctas = p.correctas.slice(0, 1);
     } else {
       p.opciones = [];
       p.correctas = [];
@@ -187,15 +197,24 @@
     });
   }
 
-  // ---------- Barra de formato (negrita, cursiva, tachado) al seleccionar texto ----------
+  // ---------- Barra flotante al seleccionar texto: negrita/cursiva/tachado, o "Marcar espacio" en huecos ----------
   const barraFormato = document.createElement('div');
   barraFormato.className = 'rt-bar';
   barraFormato.setAttribute('role', 'toolbar');
-  barraFormato.innerHTML = [['bold', '<b>B</b>', 'Negrita (Ctrl+B)'], ['italic', '<i>I</i>', 'Cursiva (Ctrl+I)'], ['strikeThrough', '<s>S</s>', 'Tachado']]
-    .map(([c, t, n]) => `<button type="button" data-cmd="${c}" title="${n}" aria-label="${n}">${t}</button>`).join('');
   document.body.appendChild(barraFormato);
   barraFormato.addEventListener('mousedown', (e) => e.preventDefault());
   barraFormato.addEventListener('click', (e) => {
+    const bh = e.target.closest('[data-hueco-btn]');
+    if (bh) {
+      const campo = barraFormato._campoHuecos;
+      const p = campo && preguntaDe(campo);
+      barraFormato.classList.remove('show');
+      if (campo && p && Tipos.marcarHueco(campo, p)) {
+        pintarPreguntas();
+        programarGuardado();
+      }
+      return;
+    }
     const b = e.target.closest('[data-cmd]');
     if (!b) return;
     document.execCommand(b.dataset.cmd, false);
@@ -204,20 +223,32 @@
   function actualizarBarraFormato() {
     const sel = window.getSelection();
     const nodo = sel.rangeCount ? sel.getRangeAt(0).commonAncestorContainer : null;
-    const campo = nodo && (nodo.nodeType === 1 ? nodo : nodo.parentElement).closest('.rt[contenteditable="true"]');
+    const elNodo = nodo && (nodo.nodeType === 1 ? nodo : nodo.parentElement);
+    const campoHuecos = elNodo && elNodo.closest('.huecos-edit[contenteditable="true"]');
+    const campo = campoHuecos || (elNodo && elNodo.closest('.rt[contenteditable="true"]'));
     if (!campo || sel.isCollapsed) { barraFormato.classList.remove('show'); return; }
+    if (campoHuecos) {
+      const r0 = sel.getRangeAt(0);
+      if (r0.startContainer !== r0.endContainer || r0.startContainer.nodeType !== 3) { barraFormato.classList.remove('show'); return; }
+      barraFormato.innerHTML = `<button type="button" data-hueco-btn title="Marcar como espacio a completar">${ic('blank')} Marcar espacio</button>`;
+      barraFormato._campoHuecos = campoHuecos;
+    } else {
+      barraFormato.innerHTML = [['bold', '<b>B</b>', 'Negrita (Ctrl+B)'], ['italic', '<i>I</i>', 'Cursiva (Ctrl+I)'], ['strikeThrough', '<s>S</s>', 'Tachado']]
+        .map(([c, t, n]) => `<button type="button" data-cmd="${c}" title="${n}" aria-label="${n}">${t}</button>`).join('');
+      barraFormato._campoHuecos = null;
+    }
     const r = sel.getRangeAt(0).getBoundingClientRect();
-    barraFormato.style.left = `${Math.max(8, Math.min(innerWidth - 140, r.left + r.width / 2 - 62))}px`;
+    barraFormato.style.left = `${Math.max(8, Math.min(innerWidth - 170, r.left + r.width / 2 - 70))}px`;
     barraFormato.style.top = `${Math.max(8, r.top - 46)}px`;
-    $$('[data-cmd]', barraFormato).forEach((b) => b.classList.toggle('on', document.queryCommandState(b.dataset.cmd)));
+    if (!campoHuecos) $$('[data-cmd]', barraFormato).forEach((b) => b.classList.toggle('on', document.queryCommandState(b.dataset.cmd)));
     barraFormato.classList.add('show');
   }
   document.addEventListener('selectionchange', actualizarBarraFormato);
-  document.addEventListener('mousedown', (e) => { if (!e.target.closest('.rt-bar, .rt')) barraFormato.classList.remove('show'); });
+  document.addEventListener('mousedown', (e) => { if (!e.target.closest('.rt-bar, .rt, .huecos-edit')) barraFormato.classList.remove('show'); });
   window.addEventListener('scroll', () => barraFormato.classList.remove('show'), { passive: true });
-  // Al pegar en un campo con formato, solo se pega el texto.
+  // Al pegar en un campo con formato o en el de espacios, solo se pega el texto.
   document.addEventListener('paste', (e) => {
-    if (!e.target.closest || !e.target.closest('.rt[contenteditable="true"]')) return;
+    if (!e.target.closest || !e.target.closest('.rt[contenteditable="true"], .huecos-edit[contenteditable="true"]')) return;
     e.preventDefault();
     document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
   });
@@ -239,7 +270,7 @@
 
   // ---------- Versión de la base de datos ----------
   // Si no se ha vuelto a ejecutar supabase.sql, los participantes no ven lo nuevo.
-  const VERSION_BD = 5;
+  const VERSION_BD = 6;
   let versionBd = null;
   let consultaVersion = null;
   async function avisoVersion() {
@@ -900,7 +931,7 @@
     } else if (accion === 'duplicar') {
       const copia = clonar(p);
       copia.id = uid();
-      if (copia.tipo === 'unica' || copia.tipo === 'multiple') {
+      if (copia.tipo === 'unica' || copia.tipo === 'multiple' || copia.tipo === 'menu') {
         const mapa = {};
         copia.opciones.forEach((o) => { const n = uid(); mapa[o.id] = n; o.id = n; });
         copia.correctas = copia.correctas.map((c) => mapa[c]);
@@ -976,6 +1007,7 @@
   }
   function avisoPregunta(p) {
     if (!E.form.config.esExamen || p.tipo === 'parrafo') return '';
+    if (p.tipo === 'puntoImagen' && (p.modo || 'automatico') === 'manual') return `<span class="q-manual">${ic('users')} Se calificará manualmente</span>`;
     if (esCalificable(p)) return `<span class="q-ok">${ic('check')} Respuesta configurada</span>`;
     return `<span class="q-warn">${ic('alert')} ${p.tipo === 'corta' ? 'Agrega al menos una respuesta aceptada' : Tipos.es(p.tipo) ? Tipos.aviso(p) : 'Marca la respuesta correcta'}</span>`;
   }
@@ -994,7 +1026,7 @@
     const examen = E.form.config.esExamen;
     let cuerpo = '';
     if (esOpciones(p.tipo)) {
-      cuerpo = `<div class="opts">${p.opciones.map((o) => {
+      cuerpo = `${p.tipo === 'menu' ? '<p class="hint">Se mostrará como una lista desplegable.</p>' : ''}<div class="opts">${p.opciones.map((o) => {
         const ok = examen && p.correctas.includes(o.id);
         return `
           <div class="opt ${ok ? 'is-correct' : ''}" data-oid="${esc(o.id)}">
@@ -1048,8 +1080,8 @@
                 <button type="button" class="icon-btn sm danger" data-qa="quitarApoyo" aria-label="Quitar imagen">${ic('trash')}</button>
               </figcaption>
             </figure>
-            <div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="Escribe la pregunta" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>
-          </div>` : `<div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="Escribe la pregunta" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>`}
+            <div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="${esc(PLACEHOLDER_TIPO[p.tipo] || 'Escribe la pregunta')}" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>
+          </div>` : `<div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="${esc(PLACEHOLDER_TIPO[p.tipo] || 'Escribe la pregunta')}" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>`}
         <div class="q-body">${cuerpo}</div>
         <div class="q-foot">
           <span class="q-aviso">${avisoPregunta(p)}</span>
@@ -1497,7 +1529,9 @@
 
     const campo = (p, i) => {
       let entrada;
-      if (esOpciones(p.tipo)) {
+      if (p.tipo === 'menu') {
+        entrada = `<span class="select full"><select name="q_${esc(p.id)}" aria-label="Respuesta"><option value="">Elige…</option>${p.opciones.map((o) => `<option value="${esc(o.id)}">${esc(o.texto)}</option>`).join('')}</select>${ic('down', 'chev')}</span>`;
+      } else if (esOpciones(p.tipo)) {
         const tipo = p.tipo === 'multiple' ? 'checkbox' : 'radio';
         entrada = `<div class="choices ${p.tipo === 'vf' ? 'row' : ''}">${p.opciones.map((o) => `
           <label class="choice">
@@ -1574,6 +1608,7 @@
         const nombre = `q_${p.id}`;
         let r;
         if (Tipos.es(p.tipo)) r = Tipos.leer(tarjeta(p), p);
+        else if (p.tipo === 'menu') r = (formEl.elements[nombre] || {}).value || '';
         else if (p.tipo === 'multiple') r = $$(`[name="${CSS.escape(nombre)}"]:checked`, formEl).map((x) => x.value);
         else if (esOpciones(p.tipo)) r = ($(`[name="${CSS.escape(nombre)}"]:checked`, formEl) || {}).value;
         else r = (formEl.elements[nombre] || {}).value || '';

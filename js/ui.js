@@ -48,6 +48,9 @@ const ICONOS = {
   font: '<path d="M4 20 10 4h1l6 16M6.5 14h8"/><path d="M18 20v-6a2 2 0 0 1 4 0v6M18 17h4"/>',
   size: '<path d="M3 7V5h10v2M8 5v14M6 19h4M14 12v-1h7v1M17.5 11v8M16 19h3"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  menu: '<rect x="3" y="6" width="18" height="12" rx="3"/><path d="m8.5 12 2.5 2.5 2.5-2.5"/>',
+  numero: '<path d="M4 9h16M4 15h16M10 4 7.5 20M18 4l-2.5 16"/>',
+  linea: '<path d="M3 12h18"/><circle cx="14" cy="12" r="3.2"/>',
 };
 const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONOS[n] || ''}</svg>`;
 

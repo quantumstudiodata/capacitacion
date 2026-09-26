@@ -10,30 +10,41 @@ function normalizarTexto(s) {
 }
 
 const tieneTexto = (a) => String(a == null ? '' : a).trim() !== '';
+const esNumero = (v) => v !== '' && v != null && !Number.isNaN(Number(v));
 
 function coincide(respuesta, aceptadas) {
   const n = normalizarTexto(respuesta);
   return n !== '' && (aceptadas || []).some((a) => normalizarTexto(a) === n);
 }
 
+// Campos de "Párrafo con sub-respuestas": abierta (texto libre), unica/select (una opción) o multiple (varias).
+function campoCalificable(c) {
+  const modo = c.modo || 'abierta';
+  if (modo === 'abierta') return !c.manual && (c.aceptadas || []).some(tieneTexto);
+  return (c.correctas || []).length > 0;
+}
+
 function esCalificable(p) {
   switch (p.tipo) {
     case 'parrafo': return false;
     case 'corta': return (p.respuestasAceptadas || []).some(tieneTexto);
-    case 'subrespuestas': return (p.campos || []).some((c) => (c.aceptadas || []).some(tieneTexto));
-    case 'puntoImagen': return !!p.imagen && (p.zonas || []).length > 0;
+    case 'subrespuestas': return (p.campos || []).some(campoCalificable);
+    case 'puntoImagen': return (p.modo || 'automatico') === 'automatico' && !!p.imagen && (p.zonas || []).length > 0;
     case 'etiquetarImagen': return (p.marcadores || []).some((m) => tieneTexto(m.texto));
     case 'zonasImagen': return (p.marcadores || []).some(zonaCalificable);
     case 'ordenar': return (p.elementos || []).length >= 2;
     case 'relacionar': return (p.pares || []).length >= 1;
     case 'huecos': return (p.huecos || []).length > 0;
+    case 'escala': return tieneTexto(p.correcta);
+    case 'numero': return p.modoRespuesta === 'rango' ? (tieneTexto(p.minimo) && tieneTexto(p.maximo)) : tieneTexto(p.valor);
+    case 'lineaNumerica': return tieneTexto(p.valor);
     default: return (p.correctas || []).length > 0;
   }
 }
 
 // Un punto de "Zonas en imagen" se califica si tiene respuesta correcta según su modo.
 function zonaCalificable(m) {
-  return m.modo === 'corta' ? (m.aceptadas || []).some(tieneTexto) : tieneTexto(m.correcta);
+  return m.modo === 'corta' ? (!m.manual && (m.aceptadas || []).some(tieneTexto)) : tieneTexto(m.correcta);
 }
 
 // Una respuesta está vacía si no tiene ningún texto (sirve para cualquier tipo).
@@ -45,16 +56,13 @@ function respuestaVacia(r) {
 }
 
 // Desglose por partes de los tipos compuestos: [{ etiqueta, respuesta, correcta, ok }].
-// ok es null cuando esa parte no tiene respuesta correcta configurada.
+// ok es null cuando esa parte no tiene respuesta correcta configurada (o se calificará a mano).
 function desglose(p, r) {
   const obj = r && typeof r === 'object' && !Array.isArray(r) ? r : {};
   const arr = Array.isArray(r) ? r : [];
   switch (p.tipo) {
     case 'subrespuestas':
-      return (p.campos || []).map((c) => {
-        const ac = (c.aceptadas || []).filter(tieneTexto);
-        return { etiqueta: c.etiqueta || 'Campo', respuesta: obj[c.id] || '', correcta: ac.join(' / '), ok: ac.length ? coincide(obj[c.id], ac) : null };
-      });
+      return (p.campos || []).map((c, i) => desgloseCampo(c, i, obj[c.id]));
     case 'etiquetarImagen':
       return (p.marcadores || []).map((m, i) => ({
         etiqueta: `Punto ${i + 1}`, respuesta: obj[m.id] || '', correcta: m.texto || '',
@@ -64,6 +72,7 @@ function desglose(p, r) {
       return (p.marcadores || []).map((m, i) => {
         const r = obj[m.id];
         if (m.modo === 'corta') {
+          if (m.manual) return { etiqueta: `Punto ${i + 1}`, respuesta: r || '', correcta: '', ok: null };
           const ac = (m.aceptadas || []).filter(tieneTexto);
           return { etiqueta: `Punto ${i + 1}`, respuesta: r || '', correcta: ac.join(' / '), ok: ac.length ? coincide(r, ac) : null };
         }
@@ -79,8 +88,43 @@ function desglose(p, r) {
       return (p.pares || []).map((q) => ({ etiqueta: q.izquierda, respuesta: obj[q.id] || '', correcta: q.derecha, ok: coincide(obj[q.id], [q.derecha]) }));
     case 'huecos':
       return (p.huecos || []).map((h, i) => ({ etiqueta: `Espacio ${i + 1}`, respuesta: arr[i] || '', correcta: h.join(' / '), ok: coincide(arr[i], h) }));
+    case 'escala': {
+      const texto = (id) => p.modo === 'likert' ? (((p.opciones || []).find((o) => o.id === id) || {}).texto || '') : (id || '');
+      return [{ etiqueta: 'Respuesta', respuesta: texto(r), correcta: tieneTexto(p.correcta) ? texto(p.correcta) : '', ok: tieneTexto(p.correcta) ? (r === p.correcta) : null }];
+    }
+    case 'numero': {
+      const suf = p.unidad ? ` ${p.unidad}` : '';
+      const rango = p.modoRespuesta === 'rango';
+      const hayClave = rango ? (tieneTexto(p.minimo) && tieneTexto(p.maximo)) : tieneTexto(p.valor);
+      const correcta = rango ? `${p.minimo}–${p.maximo}${suf}` : `${p.valor}${suf}${Number(p.tolerancia) ? ` (± ${p.tolerancia})` : ''}`;
+      return [{ etiqueta: 'Respuesta', respuesta: tieneTexto(r) ? `${r}${suf}` : '', correcta: hayClave ? correcta : '', ok: hayClave ? (esNumero(r) && fraccion(p, r) === 1) : null }];
+    }
+    case 'lineaNumerica': {
+      const hayClave = tieneTexto(p.valor);
+      return [{ etiqueta: 'Respuesta', respuesta: tieneTexto(r) ? String(r) : '', correcta: hayClave ? `${p.valor}${Number(p.tolerancia) ? ` (± ${p.tolerancia})` : ''}` : '', ok: hayClave ? (esNumero(r) && fraccion(p, r) === 1) : null }];
+    }
   }
   return null;
+}
+
+// Una fila del desglose de "Párrafo con sub-respuestas", según el modo del campo.
+function desgloseCampo(c, i, r) {
+  const etiqueta = c.etiqueta || `Campo ${i + 1}`;
+  const modo = c.modo || 'abierta';
+  if (modo === 'abierta') {
+    if (c.manual) return { etiqueta, respuesta: r || '', correcta: '', ok: null };
+    const ac = (c.aceptadas || []).filter(tieneTexto);
+    return { etiqueta, respuesta: r || '', correcta: ac.join(' / '), ok: ac.length ? coincide(r, ac) : null };
+  }
+  const texto = (id) => ((c.opciones || []).find((o) => o.id === id) || {}).texto || '';
+  if (modo === 'multiple') {
+    const sel = Array.isArray(r) ? r : [];
+    const correctas = c.correctas || [];
+    const ok = correctas.length ? (sel.every((s) => correctas.includes(s)) && correctas.every((cc) => sel.includes(cc))) : null;
+    return { etiqueta, respuesta: sel.map(texto).join(', '), correcta: correctas.map(texto).join(', '), ok };
+  }
+  const correcta = (c.correctas || [])[0];
+  return { etiqueta, respuesta: texto(r), correcta: texto(correcta), ok: correcta ? r === correcta : null };
 }
 
 function dentroDeZona(p, r) {
@@ -98,11 +142,24 @@ function fraccion(p, r) {
     }
     case 'unica':
     case 'vf':
+    case 'menu':
       return typeof r === 'string' && p.correctas.includes(r) ? 1 : 0;
     case 'corta':
       return typeof r === 'string' && coincide(r, p.respuestasAceptadas) ? 1 : 0;
     case 'puntoImagen':
       return dentroDeZona(p, r) ? 1 : 0;
+    case 'escala':
+      return typeof r === 'string' && tieneTexto(p.correcta) && r === p.correcta ? 1 : 0;
+    case 'numero': {
+      if (!esNumero(r)) return 0;
+      const n = Number(r);
+      if (p.modoRespuesta === 'rango') {
+        return tieneTexto(p.minimo) && tieneTexto(p.maximo) && n >= Number(p.minimo) && n <= Number(p.maximo) ? 1 : 0;
+      }
+      return tieneTexto(p.valor) && Math.abs(n - Number(p.valor)) <= (Number(p.tolerancia) || 0) ? 1 : 0;
+    }
+    case 'lineaNumerica':
+      return esNumero(r) && tieneTexto(p.valor) && Math.abs(Number(r) - Number(p.valor)) <= (Number(p.tolerancia) || 0) ? 1 : 0;
     default: {
       const partes = (desglose(p, r) || []).filter((x) => x.ok !== null);
       return partes.length ? partes.filter((x) => x.ok).length / partes.length : 0;
@@ -140,14 +197,21 @@ function calificar(form, respuestas) {
 function claveDe(p) {
   switch (p.tipo) {
     case 'corta': return p.respuestasAceptadas || [];
-    case 'subrespuestas': return Object.fromEntries((p.campos || []).map((c) => [c.id, c.aceptadas || []]));
+    case 'subrespuestas': return Object.fromEntries((p.campos || []).map((c) => [c.id, {
+      modo: c.modo || 'abierta',
+      aceptadas: (c.modo || 'abierta') === 'abierta' && !c.manual ? c.aceptadas || [] : [],
+      correctas: (c.modo || 'abierta') === 'abierta' ? [] : c.correctas || []
+    }]));
     case 'puntoImagen': return p.zonas || [];
     case 'etiquetarImagen': return Object.fromEntries((p.marcadores || []).map((m) => [m.id, m.texto || '']));
     case 'zonasImagen': return Object.fromEntries((p.marcadores || []).map((m) => [m.id,
-      m.modo === 'corta' ? m.aceptadas || [] : tieneTexto(m.correcta) ? [m.correcta] : []]));
+      m.modo === 'corta' ? (m.manual ? [] : m.aceptadas || []) : tieneTexto(m.correcta) ? [m.correcta] : []]));
     case 'ordenar': return (p.elementos || []).map((e) => e.id);
     case 'relacionar': return Object.fromEntries((p.pares || []).map((q) => [q.id, q.derecha]));
     case 'huecos': return p.huecos || [];
+    case 'escala': return p.correcta || '';
+    case 'numero': return { modoRespuesta: p.modoRespuesta, valor: p.valor || '', minimo: p.minimo || '', maximo: p.maximo || '', tolerancia: p.tolerancia || 0 };
+    case 'lineaNumerica': return { valor: p.valor || '', tolerancia: p.tolerancia || 0 };
     default: return p.correctas || [];
   }
 }
@@ -158,7 +222,9 @@ function conClave(pub, clave) {
   if (clave == null) return p;
   switch (p.tipo) {
     case 'corta': p.respuestasAceptadas = clave; break;
-    case 'subrespuestas': p.campos = (pub.campos || []).map((c) => Object.assign({}, c, { aceptadas: clave[c.id] || [] })); break;
+    case 'subrespuestas': p.campos = (pub.campos || []).map((c) => Object.assign({}, c, {
+      aceptadas: ((clave[c.id] || {}).aceptadas) || [], correctas: ((clave[c.id] || {}).correctas) || []
+    })); break;
     case 'puntoImagen': p.zonas = clave; break;
     case 'etiquetarImagen': p.marcadores = (pub.marcadores || []).map((m) => Object.assign({}, m, { texto: clave[m.id] || '' })); break;
     case 'zonasImagen': p.marcadores = (pub.marcadores || []).map((m) => Object.assign({}, m, m.modo === 'corta'
@@ -166,6 +232,9 @@ function conClave(pub, clave) {
     case 'ordenar': p.elementos = clave.map((id) => (pub.elementos || []).find((e) => e.id === id)).filter(Boolean); break;
     case 'relacionar': p.pares = (pub.izquierda || []).map((q) => ({ id: q.id, izquierda: q.texto, derecha: clave[q.id] || '' })); break;
     case 'huecos': p.huecos = clave; break;
+    case 'escala': p.correcta = clave || ''; break;
+    case 'numero': Object.assign(p, clave); break;
+    case 'lineaNumerica': Object.assign(p, clave); break;
     default: p.correctas = clave;
   }
   return p;
@@ -200,7 +269,10 @@ function preguntaPublica(p, examen) {
   };
   switch (p.tipo) {
     case 'subrespuestas':
-      base.campos = (p.campos || []).map((c) => ({ id: c.id, etiqueta: c.etiqueta }));
+      base.campos = (p.campos || []).map((c) => ({
+        id: c.id, etiqueta: c.etiqueta, modo: c.modo || 'abierta',
+        opciones: (c.modo || 'abierta') === 'abierta' ? [] : (c.opciones || []).map((o) => ({ id: o.id, texto: o.texto }))
+      }));
       break;
     case 'puntoImagen':
       base.imagen = p.imagen || '';
@@ -229,6 +301,24 @@ function preguntaPublica(p, examen) {
       break;
     case 'huecos':
       base.segmentos = p.segmentos || [''];
+      break;
+    case 'escala':
+      base.modo = p.modo === 'likert' ? 'likert' : 'numerica';
+      base.min = Number(p.min) || 1;
+      base.max = Number(p.max) || 5;
+      base.etiquetaMin = p.etiquetaMin || '';
+      base.etiquetaMax = p.etiquetaMax || '';
+      break;
+    case 'numero':
+      base.unidad = p.unidad || '';
+      base.decimales = Math.max(0, Number(p.decimales) || 0);
+      break;
+    case 'lineaNumerica':
+      base.min = Number(p.min) || 0;
+      base.max = Number(p.max) || 100;
+      base.paso = Number(p.paso) || 1;
+      base.etiquetaMin = p.etiquetaMin || '';
+      base.etiquetaMax = p.etiquetaMax || '';
       break;
   }
   return base;
