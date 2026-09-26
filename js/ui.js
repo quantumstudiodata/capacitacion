@@ -78,3 +78,37 @@ function leerImagen(archivo, max = 1200) {
     lector.readAsDataURL(archivo);
   });
 }
+
+// ---------- Texto con formato (solo negrita, cursiva y tachado) ----------
+// Convierte cualquier HTML en un subconjunto seguro: <b>, <i>, <s> y <br>. Todo lo demás se escapa.
+function limpiarHtml(html) {
+  const doc = new DOMParser().parseFromString(`<div>${html || ''}</div>`, 'text/html');
+  const ETIQUETAS = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', S: 's', STRIKE: 's', DEL: 's' };
+  const recorrer = (nodo) => [...nodo.childNodes].map((n) => {
+    if (n.nodeType === 3) return esc(n.nodeValue);
+    if (n.nodeType !== 1) return '';
+    if (n.tagName === 'BR') return '<br>';
+    let dentro = recorrer(n);
+    if (!dentro) return n.tagName === 'DIV' || n.tagName === 'P' ? '<br>' : '';
+    const estilo = n.getAttribute('style') || '';
+    if (/font-weight:\s*(bold|[6-9]00)/i.test(estilo)) dentro = `<b>${dentro}</b>`;
+    if (/font-style:\s*italic/i.test(estilo)) dentro = `<i>${dentro}</i>`;
+    if (/line-through/i.test(estilo)) dentro = `<s>${dentro}</s>`;
+    const t = ETIQUETAS[n.tagName];
+    if (t) return `<${t}>${dentro}</${t}>`;
+    if (n.tagName === 'DIV' || n.tagName === 'P') return `<br>${dentro}`;
+    return dentro;
+  }).join('');
+  return recorrer(doc.body.firstChild).replace(/^(<br>)+|(<br>)+$/g, '');
+}
+
+// HTML seguro para mostrar: el texto con formato si existe; si no, el texto plano escapado.
+const textoRico = (html, plano) => (html ? limpiarHtml(html) : esc(plano || '').replace(/\n/g, '<br>'));
+
+// Guarda el contenido de un campo editable como texto plano + HTML con formato (si lo tiene).
+function leerRico(el) {
+  const plano = el.innerText.replace(/ /g, ' ').trim();
+  if (!plano) el.innerHTML = '';
+  const html = limpiarHtml(el.innerHTML);
+  return { plano, html: /<(b|i|s)>/.test(html) ? html : '' };
+}

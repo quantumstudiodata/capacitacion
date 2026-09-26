@@ -12,6 +12,13 @@
     parrafo: { nombre: 'Párrafo', icono: 'parrafo' },
     ...Tipos.LISTA
   };
+  const DESC_TIPOS = {
+    unica: 'Elige una sola respuesta', multiple: 'Elige varias respuestas', vf: 'Verdadero o falso',
+    corta: 'Texto breve', parrafo: 'Respuesta larga', subrespuestas: 'Varios campos de texto',
+    puntoImagen: 'Tocar un punto en la imagen', etiquetarImagen: 'Nombrar puntos numerados',
+    zonasImagen: 'Opción o texto por punto', ordenar: 'Arrastrar en orden', relacionar: 'Unir dos columnas',
+    huecos: 'Completar el texto'
+  };
   const esOpciones = (t) => t === 'unica' || t === 'multiple' || t === 'vf';
 
   const CONFIG_BASE = {
@@ -143,7 +150,8 @@
     toast(mensaje);
   }
 
-  const logo = () => `<div class="brand">${'<span class="brand-mark">' + ic('check') + '</span>'}<span class="brand-name">${esc(window.CONFIG.NOMBRE)}</span></div>`;
+  // Logo de Formalia (se pinta con el color del texto, así sirve en temas claros y oscuros).
+  const logo = (tam = '') => `<div class="brand ${tam}"><span class="brand-logo" role="img" aria-label="${esc(window.CONFIG.NOMBRE)}"></span></div>`;
 
   function topbar() {
     const u = Sesion.usuario() || {};
@@ -155,7 +163,7 @@
           <div class="user-menu">
             <button class="avatar" id="avatarBtn" aria-label="Cuenta">${esc(iniciales(u.nombre))}</button>
             <div class="dropdown" id="userDropdown">
-              <div class="dropdown-head"><strong>${esc(u.nombre)}</strong><span>${esc(u.email)}</span><span class="chip chip-role">Capacitador</span></div>
+              <div class="dropdown-head"><strong>${esc(u.nombre)}</strong><span>${esc(u.email)}</span></div>
               <button class="dropdown-item" data-accion="logout">${ic('logout')} Cerrar sesión</button>
             </div>
           </div>
@@ -179,6 +187,41 @@
     });
   }
 
+  // ---------- Barra de formato (negrita, cursiva, tachado) al seleccionar texto ----------
+  const barraFormato = document.createElement('div');
+  barraFormato.className = 'rt-bar';
+  barraFormato.setAttribute('role', 'toolbar');
+  barraFormato.innerHTML = [['bold', '<b>B</b>', 'Negrita (Ctrl+B)'], ['italic', '<i>I</i>', 'Cursiva (Ctrl+I)'], ['strikeThrough', '<s>S</s>', 'Tachado']]
+    .map(([c, t, n]) => `<button type="button" data-cmd="${c}" title="${n}" aria-label="${n}">${t}</button>`).join('');
+  document.body.appendChild(barraFormato);
+  barraFormato.addEventListener('mousedown', (e) => e.preventDefault());
+  barraFormato.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cmd]');
+    if (!b) return;
+    document.execCommand(b.dataset.cmd, false);
+    actualizarBarraFormato();
+  });
+  function actualizarBarraFormato() {
+    const sel = window.getSelection();
+    const nodo = sel.rangeCount ? sel.getRangeAt(0).commonAncestorContainer : null;
+    const campo = nodo && (nodo.nodeType === 1 ? nodo : nodo.parentElement).closest('.rt[contenteditable="true"]');
+    if (!campo || sel.isCollapsed) { barraFormato.classList.remove('show'); return; }
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    barraFormato.style.left = `${Math.max(8, Math.min(innerWidth - 140, r.left + r.width / 2 - 62))}px`;
+    barraFormato.style.top = `${Math.max(8, r.top - 46)}px`;
+    $$('[data-cmd]', barraFormato).forEach((b) => b.classList.toggle('on', document.queryCommandState(b.dataset.cmd)));
+    barraFormato.classList.add('show');
+  }
+  document.addEventListener('selectionchange', actualizarBarraFormato);
+  document.addEventListener('mousedown', (e) => { if (!e.target.closest('.rt-bar, .rt')) barraFormato.classList.remove('show'); });
+  window.addEventListener('scroll', () => barraFormato.classList.remove('show'), { passive: true });
+  // Al pegar en un campo con formato, solo se pega el texto.
+  document.addEventListener('paste', (e) => {
+    if (!e.target.closest || !e.target.closest('.rt[contenteditable="true"]')) return;
+    e.preventDefault();
+    document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain'));
+  });
+
   // Ampliar imágenes de apoyo.
   const ampliar = (img) => modal(`
       <button class="icon-btn modal-x" data-cerrar aria-label="Cerrar">${ic('x')}</button>
@@ -190,12 +233,13 @@
   });
 
   document.addEventListener('click', (e) => {
+    if (!e.target.closest('.tipo-picker')) $$('.tipo-pop.open').forEach((m) => m.classList.remove('open'));
     if (!e.target.closest('.dropdown, .menu')) $$('.dropdown.open, .menu.open').forEach((m) => m.classList.remove('open'));
   });
 
   // ---------- Versión de la base de datos ----------
-  // Si el capacitador no ha vuelto a ejecutar supabase.sql, los participantes no ven lo nuevo.
-  const VERSION_BD = 4;
+  // Si no se ha vuelto a ejecutar supabase.sql, los participantes no ven lo nuevo.
+  const VERSION_BD = 5;
   let versionBd = null;
   let consultaVersion = null;
   async function avisoVersion() {
@@ -270,33 +314,41 @@
   }
 
   // ---------- Login ----------
+  // ---------- Login ----------
+  const REQUISITOS = [
+    ['largo', 'Mínimo 8 caracteres', (v) => v.length >= 8],
+    ['mayus', 'Una letra mayúscula', (v) => /[A-ZÁÉÍÓÚÑ]/.test(v)],
+    ['numero', 'Un número', (v) => /\d/.test(v)],
+    ['especial', 'Un carácter especial (!@#$…)', (v) => /[^A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s]/.test(v)]
+  ];
+
   function vistaLogin() {
     document.title = `Iniciar sesión · ${window.CONFIG.NOMBRE}`;
+    const ojo = (campo) => `<button type="button" class="icon-btn sm pass-ver" data-ver="${campo}" aria-label="Mostrar contraseña">${ic('eye')}</button>`;
     app.innerHTML = `
       <div class="auth">
         <section class="auth-brand">
-          ${logo()}
+          ${logo('grande')}
           <div class="auth-copy">
-            <p class="eyebrow">Portal para capacitadores</p>
-            <h1>Crea, comparte y califica <span class="grad-text">evaluaciones</span> en minutos.</h1>
-            <p class="muted">Diseña exámenes y formularios, comparte una liga y deja que la calificación se haga sola.</p>
+            <h1>Crea evaluaciones. Obtén resultados. <span class="grad-text">Ahorra tiempo.</span></h1>
+            <p class="auth-lead">Diseña exámenes, cuestionarios y formularios interactivos en minutos. Compártelos mediante una liga y deja que la plataforma califique las respuestas y organice los resultados automáticamente.</p>
+            <div class="feature-hero">
+              <span class="fh-ic">${ic('sparkles')}</span>
+              <div><strong>Crea sin complicaciones</strong><p>Diseña evaluaciones con diferentes tipos de preguntas, imágenes y opciones de calificación.</p></div>
+            </div>
             <ul class="features">
               <li><span>${ic('award')}</span>Exámenes con calificación automática</li>
               <li><span>${ic('link')}</span>Comparte con una liga, sin que se registren</li>
               <li><span>${ic('chart')}</span>Resultados y estadísticas al instante</li>
             </ul>
           </div>
-          <div class="auth-preview" aria-hidden="true">
-            <div class="ap-card">
-              <div class="ap-line w60"></div>
-              <div class="ap-opt"><span class="ap-dot on"></span><div class="ap-line w40"></div></div>
-              <div class="ap-opt"><span class="ap-dot"></span><div class="ap-line w50"></div></div>
-              <div class="ap-opt"><span class="ap-dot"></span><div class="ap-line w30"></div></div>
-            </div>
-            <div class="ap-score"><strong>92%</strong><span>Aprobado</span></div>
-          </div>
         </section>
         <section class="auth-panel">
+          <div class="mascota" id="mascota" aria-hidden="true">
+            <span class="mascota-halo"></span>
+            ${[1, 2, 3, 4].map((n) => `<img src="img/foca${n}.png" alt="" class="foca foca${n} ${n === 2 ? 'on' : ''}" draggable="false">`).join('')}
+            <span class="mascota-globo" id="globo">¡Hola! Qué gusto verte.</span>
+          </div>
           <div class="auth-card">
             <div class="seg" role="tablist">
               <button type="button" class="seg-btn active" data-modo="login">Iniciar sesión</button>
@@ -305,7 +357,7 @@
             </div>
             <div class="auth-head">
               <h2 id="authTitulo">Bienvenido de vuelta</h2>
-              <p class="muted" id="authSub">Ingresa a tu cuenta de capacitador.</p>
+              <p class="muted" id="authSub">Ingresa a tu cuenta de ${esc(window.CONFIG.NOMBRE)}.</p>
             </div>
             <form id="authForm" novalidate>
               <label class="field solo-registro" hidden>
@@ -318,7 +370,15 @@
               </label>
               <label class="field">
                 <span>Contraseña</span>
-                <input name="password" type="password" autocomplete="current-password" placeholder="••••••••" required minlength="6">
+                <span class="pass-wrap"><input name="password" type="password" autocomplete="current-password" placeholder="••••••••" required>${ojo('password')}</span>
+              </label>
+              <ul class="pass-req solo-registro" id="passReq" hidden>
+                ${REQUISITOS.map(([k, t]) => `<li data-req="${k}">${ic('check')}<span>${t}</span></li>`).join('')}
+              </ul>
+              <label class="field solo-registro" hidden>
+                <span>Repetir contraseña</span>
+                <span class="pass-wrap"><input name="password2" type="password" autocomplete="new-password" placeholder="••••••••">${ojo('password2')}</span>
+                <small class="pass-match" id="passMatch"></small>
               </label>
               <p class="form-msg" id="authMsg" hidden></p>
               <button class="btn btn-primary btn-block btn-lg" id="authBtn">Entrar</button>
@@ -333,34 +393,94 @@
     const msg = $('#authMsg');
     const mostrarMsg = (t, tipo = 'err') => { msg.hidden = false; msg.className = `form-msg ${tipo}`; msg.textContent = t; };
 
+    // Mascota: cambia de pose según lo que hace la persona.
+    const mascota = $('#mascota');
+    const globo = $('#globo');
+    let globoTimer = null;
+    const pose = (n, texto, anim) => {
+      $$('.foca', mascota).forEach((f) => f.classList.toggle('on', f.classList.contains(`foca${n}`)));
+      if (texto) {
+        globo.textContent = texto;
+        globo.classList.remove('show');
+        void globo.offsetWidth;
+        globo.classList.add('show');
+        clearTimeout(globoTimer);
+        globoTimer = setTimeout(() => globo.classList.remove('show'), 3200);
+      }
+      if (anim) {
+        mascota.classList.remove('salta', 'tiembla');
+        void mascota.offsetWidth;
+        mascota.classList.add(anim);
+      }
+    };
+    setTimeout(() => pose(2, '¡Hola! Qué gusto verte.', 'salta'), 350);
+    form.addEventListener('focusin', (e) => {
+      const n = e.target.name;
+      if (n === 'password' || n === 'password2') pose(3, 'Tranquilo, no estoy mirando…');
+      else if (n === 'email') pose(4, modo === 'login' ? '¿Con qué correo entras?' : 'Tu correo será tu usuario.');
+      else if (n === 'nombre') pose(1, '¿Cómo te llamas?');
+    });
+    form.addEventListener('focusout', () => setTimeout(() => { if (!form.contains(document.activeElement)) pose(2); }, 0));
+
+    const pass = form.password;
+    const pass2 = form.password2;
+    const revisarPass = () => {
+      const v = pass.value;
+      REQUISITOS.forEach(([k, , ok]) => $(`[data-req="${k}"]`).classList.toggle('ok', ok(v)));
+      const m = $('#passMatch');
+      if (!pass2.value) { m.textContent = ''; m.className = 'pass-match'; return; }
+      const igual = pass2.value === v;
+      m.textContent = igual ? 'Las contraseñas coinciden' : 'Las contraseñas no coinciden';
+      m.className = `pass-match ${igual ? 'ok' : 'bad'}`;
+    };
+    pass.addEventListener('input', revisarPass);
+    pass2.addEventListener('input', revisarPass);
+    $$('[data-ver]').forEach((b) => b.addEventListener('click', () => {
+      const i = form[b.dataset.ver];
+      i.type = i.type === 'password' ? 'text' : 'password';
+      b.classList.toggle('on', i.type === 'text');
+    }));
+
     $$('.seg-btn').forEach((b) => b.addEventListener('click', () => {
       modo = b.dataset.modo;
       $$('.seg-btn').forEach((x) => x.classList.toggle('active', x === b));
       $('.seg').classList.toggle('der', modo === 'registro');
       $$('.solo-registro').forEach((x) => { x.hidden = modo !== 'registro'; });
       $('#authTitulo').textContent = modo === 'login' ? 'Bienvenido de vuelta' : 'Crea tu cuenta';
-      $('#authSub').textContent = modo === 'login' ? 'Ingresa a tu cuenta de capacitador.' : 'Empieza a crear tus formularios y exámenes.';
+      $('#authSub').textContent = modo === 'login' ? `Ingresa a tu cuenta de ${window.CONFIG.NOMBRE}.` : 'Empieza a crear tus formularios en minutos.';
       $('#authBtn').textContent = modo === 'login' ? 'Entrar' : 'Crear cuenta';
-      form.password.autocomplete = modo === 'login' ? 'current-password' : 'new-password';
+      pass.autocomplete = modo === 'login' ? 'current-password' : 'new-password';
       msg.hidden = true;
+      pose(modo === 'login' ? 2 : 4, modo === 'login' ? '¡Qué bueno que regresas!' : '¡Bienvenido a Formalia!', 'salta');
+      revisarPass();
     }));
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const datos = Object.fromEntries(new FormData(form));
-      if (modo === 'registro' && !datos.nombre.trim()) return mostrarMsg('Escribe tu nombre.');
-      if (!/^\S+@\S+\.\S+$/.test(datos.email)) return mostrarMsg('Escribe un correo válido.');
-      if ((datos.password || '').length < 6) return mostrarMsg('La contraseña debe tener al menos 6 caracteres.');
+      const error = (t) => { mostrarMsg(t); pose(1, 'Revisa los datos, por favor.', 'tiembla'); };
+      if (modo === 'registro' && !datos.nombre.trim()) return error('Escribe tu nombre.');
+      if (!/^\S+@\S+\.\S+$/.test(datos.email)) return error('Escribe un correo válido.');
+      if (modo === 'registro') {
+        const falta = REQUISITOS.filter(([, , ok]) => !ok(datos.password || ''));
+        if (falta.length) return error(`A tu contraseña le falta: ${falta.map(([, t]) => t.toLowerCase()).join(', ')}.`);
+        if (datos.password !== datos.password2) return error('Las contraseñas no coinciden.');
+      } else if (!datos.password) return error('Escribe tu contraseña.');
+      delete datos.password2;
       const btn = $('#authBtn');
       btn.disabled = true;
       btn.classList.add('loading');
       try {
         const s = await API.call(modo === 'login' ? 'login' : 'register', datos);
         Sesion.set(s);
+        pose(4, '¡Adelante!', 'salta');
+        await new Promise((r) => setTimeout(r, 450));
         location.hash = '#/formularios';
         render();
       } catch (err) {
         mostrarMsg(err.message, err.info ? 'info' : 'err');
+        if (err.info) pose(4, '¡Revisa tu correo!', 'salta');
+        else pose(1, 'Mmm… algo no coincide.', 'tiembla');
       } finally {
         btn.disabled = false;
         btn.classList.remove('loading');
@@ -378,24 +498,19 @@
       ${topbar()}
       <main class="container">
         <section class="hero">
-          <p class="eyebrow">Panel del capacitador</p>
+          <p class="eyebrow">Tu espacio</p>
           <h1>Hola, <span class="grad-text">${esc(String(u.nombre).split(' ')[0])}</span></h1>
           <p class="muted">¿Qué vas a crear hoy?</p>
         </section>
         <section class="create-grid">
-          <button class="create-card" data-crear="examen">
-            <span class="cc-icon">${ic('award')}</span>
-            <span class="cc-text"><strong>Nuevo examen</strong><small>Con puntos y calificación automática</small></span>
-            <span class="cc-plus">${ic('plus')}</span>
-          </button>
           <button class="create-card" data-crear="formulario">
-            <span class="cc-icon alt">${ic('form')}</span>
-            <span class="cc-text"><strong>Nuevo formulario</strong><small>Encuestas, registros y opiniones</small></span>
+            <span class="cc-icon">${ic('form')}</span>
+            <span class="cc-text"><strong>Nuevo formulario</strong><small>Exámenes, cuestionarios o encuestas</small></span>
             <span class="cc-plus">${ic('plus')}</span>
           </button>
           <div class="create-card soon" aria-disabled="true">
             <span class="cc-icon muted-icon">${ic('book')}</span>
-            <span class="cc-text"><strong>Contenido</strong><small>Sube materiales de capacitación</small></span>
+            <span class="cc-text"><strong>Contenido</strong><small>Sube materiales de apoyo</small></span>
             <span class="chip">Próximamente</span>
           </div>
         </section>
@@ -444,8 +559,8 @@
     }
     grid.innerHTML = lista.map((f, i) => `
       <article class="form-card" data-id="${esc(f.id)}" style="--i:${i}">
-        <a class="fc-cover ${f.esExamen ? 'examen' : 'encuesta'}" href="#/editar/${esc(f.id)}">
-          <span class="fc-art">${ic(f.esExamen ? 'award' : 'form')}</span>
+        <a class="fc-cover ${f.portada ? 'con-foto' : ''}" href="#/editar/${esc(f.id)}" style="--cover:${esc(portadaDe(f))}">
+          ${f.portada ? '' : `<span class="fc-art">${ic(f.esExamen ? 'award' : 'form')}</span>`}
           <span class="chip chip-glass">${f.esExamen ? 'Examen' : 'Formulario'}</span>
           ${f.aceptaRespuestas ? '' : '<span class="chip chip-glass chip-closed">Cerrado</span>'}
         </a>
@@ -503,14 +618,18 @@
     }));
   }
 
+  // Fondo de la tarjeta en "Mis formularios": la imagen de portada o el degradado de su plantilla.
+  const portadaDe = (f) => f.portada
+    ? `linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,.45)), url("${f.portada}") center / cover`
+    : Diseno.variables({ plantilla: f.plantilla, acento: f.acento })['--hero'];
+
   async function crearForm(tipo, btn) {
     btn.disabled = true;
     btn.classList.add('loading');
-    const examen = tipo === 'examen';
     const form = {
-      titulo: examen ? 'Examen sin título' : 'Formulario sin título',
+      titulo: 'Formulario sin título',
       descripcion: '',
-      config: Object.assign({}, CONFIG_BASE, { esExamen: examen }),
+      config: Object.assign({}, CONFIG_BASE),
       preguntas: [nuevaPregunta('unica')]
     };
     try {
@@ -670,6 +789,17 @@
   function onEditorInput(e) {
     const t = e.target;
     if (t.tagName === 'TEXTAREA') autoAltura(t);
+    if (t.isContentEditable) {
+      const { plano, html } = leerRico(t);
+      const destino = t.dataset.f ? E.form : preguntaDe(t);
+      const campo = t.dataset.f || t.dataset.q;
+      if (!destino) return;
+      destino[campo] = plano;
+      if (html) destino[`${campo}Html`] = html;
+      else delete destino[`${campo}Html`];
+      programarGuardado();
+      return;
+    }
     if (t.dataset.f) {
       E.form[t.dataset.f] = t.value;
       if (t.dataset.f === 'titulo') $('#ebName').textContent = t.value || 'Sin título';
@@ -790,6 +920,25 @@
       const o = { id: uid(), texto: `Opción ${p.opciones.length + 1}` };
       p.opciones.push(o);
       enfocar = p.id + ':' + o.id;
+    } else if (accion === 'tamEncabezado') {
+      const orden = Object.keys(Diseno.TAMANOS_TEXTO);
+      const d = E.form.diseno;
+      const k = b.dataset.k;
+      const i = orden.indexOf(d[k] || 'normal') + Number(b.dataset.d);
+      if (i < 0 || i >= orden.length) return;
+      d[k] = orden[i];
+      aplicarTemaEncabezado();
+      programarGuardado();
+      return;
+    } else if (accion === 'abrirTipos') {
+      e.stopPropagation();
+      const pop = b.nextElementSibling;
+      const abierto = pop.classList.contains('open');
+      $$('.tipo-pop.open').forEach((x) => x.classList.remove('open'));
+      if (!abierto) pop.classList.add('open');
+      return;
+    } else if (accion === 'elegirTipo') {
+      if (b.dataset.tipo !== p.tipo) cambiarTipo(p, b.dataset.tipo);
     } else if (accion === 'apoyoPos') {
       p.apoyo.posicion = b.dataset.v;
     } else if (accion === 'quitarApoyo') {
@@ -870,13 +1019,19 @@
       <article class="q-card" data-qid="${esc(p.id)}" style="--i:${i}">
         <div class="q-top">
           <span class="q-num">${i + 1}</span>
-          <label class="select">
-            ${ic(TIPOS[p.tipo].icono)}
-            <select data-q="tipo" aria-label="Tipo de pregunta">
-              ${gruposTipos().map(([g, tipos]) => `<optgroup label="${g}">${tipos.map(([k, t]) => `<option value="${k}" ${k === p.tipo ? 'selected' : ''}>${t.nombre}</option>`).join('')}</optgroup>`).join('')}
-            </select>
-            ${ic('down', 'chev')}
-          </label>
+          <div class="tipo-picker">
+            <button type="button" class="tipo-btn" data-qa="abrirTipos" aria-haspopup="true">
+              <span class="tipo-ic">${ic(TIPOS[p.tipo].icono)}</span><span>${TIPOS[p.tipo].nombre}</span>${ic('down', 'chev')}
+            </button>
+            <div class="tipo-pop" role="menu">
+              ${gruposTipos().map(([g, tipos]) => `
+                <p class="type-group">${g}</p>
+                <div class="tipo-grid">${tipos.map(([k, t]) => `
+                  <button type="button" role="menuitem" class="tipo-opt ${k === p.tipo ? 'sel' : ''}" data-qa="elegirTipo" data-tipo="${k}">
+                    <span class="tipo-ic">${ic(t.icono)}</span><span class="tipo-txt"><strong>${t.nombre}</strong><small>${DESC_TIPOS[k] || ''}</small></span>
+                  </button>`).join('')}</div>`).join('')}
+            </div>
+          </div>
           <label class="btn btn-ghost btn-sm apoyo-btn" title="Agregar una imagen a esta pregunta">${ic('image')}<span>${p.apoyo && p.apoyo.imagen ? 'Cambiar imagen' : 'Imagen'}</span>
             <input type="file" accept="image/*" data-q="apoyoArchivo" hidden></label>
           ${examen && p.tipo !== 'parrafo' ? `<label class="pts"><input type="number" min="0" step="1" data-q="puntos" value="${Number(p.puntos) || 0}" aria-label="Puntos"><span>pts</span></label>` : ''}
@@ -893,8 +1048,8 @@
                 <button type="button" class="icon-btn sm danger" data-qa="quitarApoyo" aria-label="Quitar imagen">${ic('trash')}</button>
               </figcaption>
             </figure>
-            <textarea class="q-text" data-q="texto" rows="1" placeholder="Escribe la pregunta">${esc(p.texto)}</textarea>
-          </div>` : `<textarea class="q-text" data-q="texto" rows="1" placeholder="Escribe la pregunta">${esc(p.texto)}</textarea>`}
+            <div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="Escribe la pregunta" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>
+          </div>` : `<div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="Escribe la pregunta" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>`}
         <div class="q-body">${cuerpo}</div>
         <div class="q-foot">
           <span class="q-aviso">${avisoPregunta(p)}</span>
@@ -915,9 +1070,17 @@
     const cuerpo = $('#editorBody');
     const scroll = window.scrollY;
     cuerpo.innerHTML = `
-      <section class="q-card header-card">
+      <section class="q-card header-card con-tema" id="headerCard">
+        <div class="hc-tamanos" role="group" aria-label="Tamaño del texto del encabezado">
+          ${[['tamTitulo', 'Título'], ['tamDescripcion', 'Descripción']].map(([k, n]) => `
+            <span class="hc-tam" title="Tamaño de ${n.toLowerCase()}">
+              <small>${n}</small>
+              <button type="button" data-qa="tamEncabezado" data-k="${k}" data-d="-1" aria-label="${n} más chico">A−</button>
+              <button type="button" data-qa="tamEncabezado" data-k="${k}" data-d="1" aria-label="${n} más grande">A+</button>
+            </span>`).join('')}
+        </div>
         <input class="title-input" data-f="titulo" value="${esc(f.titulo)}" placeholder="Formulario sin título" aria-label="Título">
-        <textarea class="desc-input" data-f="descripcion" rows="1" placeholder="Agrega una descripción (opcional)">${esc(f.descripcion)}</textarea>
+        <div class="desc-input rt" contenteditable="true" data-f="descripcion" data-placeholder="Agrega una descripción (opcional)" aria-label="Descripción">${textoRico(f.descripcionHtml, f.descripcion)}</div>
         <div class="header-meta">
           <span class="chip ${f.config.esExamen ? 'chip-accent' : ''}">${ic(f.config.esExamen ? 'award' : 'form')} ${f.config.esExamen ? 'Examen' : 'Formulario'}</span>
           <span class="chip">${ic('list')} ${f.preguntas.length} pregunta${f.preguntas.length === 1 ? '' : 's'}</span>
@@ -930,11 +1093,22 @@
       <div class="add-q">
         <button type="button" class="btn btn-add" data-qa="menuTipos">${ic('plus')} Agregar pregunta</button>
         <div class="type-menu" id="tipoMenu">
-          ${gruposTipos().map(([g, tipos]) => `<p class="type-group">${g}</p>${tipos.map(([k, t]) => `<button type="button" class="type-opt" data-qa="agregar" data-tipo="${k}">${ic(t.icono)}<span>${t.nombre}</span></button>`).join('')}`).join('')}
+          ${gruposTipos().map(([g, tipos]) => `<p class="type-group">${g}</p>${tipos.map(([k, t]) => `<button type="button" class="type-opt" data-qa="agregar" data-tipo="${k}"><span class="tipo-ic">${ic(t.icono)}</span><span class="tipo-txt"><strong>${t.nombre}</strong><small>${DESC_TIPOS[k] || ''}</small></span></button>`).join('')}`).join('')}
         </div>
       </div>`;
     $$('textarea', cuerpo).forEach(autoAltura);
+    aplicarTemaEncabezado();
+    barraFormato.classList.remove('show');
     window.scrollTo(0, scroll);
+  }
+
+  // El encabezado del editor se ve como el de la página pública (plantilla, imagen, fuente y tamaños).
+  function aplicarTemaEncabezado() {
+    const hc = $('#headerCard');
+    if (!hc) return;
+    const v = Diseno.variables(E.form.diseno);
+    ['--hero', '--font', '--tt', '--td', '--grad'].forEach((k) => hc.style.setProperty(k, v[k]));
+    Diseno.cargarFuentes([Diseno.normalizar(E.form.diseno).fuente]);
   }
 
   // El aviso vive fuera de #editorBody para que no lo borre el cambio de pestaña.
@@ -969,14 +1143,14 @@
         <div class="design-controls">
           <section class="panel">
             <h3>${ic('layers')} Composición</h3>
-            <p class="hint">Cómo se acomoda la página que ven tus participantes.</p>
             <div class="comp-grid">
               ${Object.entries(Diseno.COMPOSICIONES).map(([k, c]) => `
-                <button type="button" class="comp-opt ${sel('composicion', k)}" data-d="composicion" data-v="${k}">
+                <button type="button" class="comp-opt ${sel('composicion', k)}" data-d="composicion" data-v="${k}" title="${c.desc}">
                   <span class="cmini cmini-${k}" aria-hidden="true">${miniComposicion(k)}</span>
-                  <strong>${c.nombre}</strong><small>${c.desc}</small>
+                  <strong>${c.nombre}</strong>
                 </button>`).join('')}
             </div>
+            <p class="comp-desc">${ic('check')} ${Diseno.COMPOSICIONES[d.composicion].nombre}: ${Diseno.COMPOSICIONES[d.composicion].desc.toLowerCase()}.</p>
           </section>
           <section class="panel">
             <h3>${ic('palette')} Plantillas</h3>
@@ -1054,6 +1228,7 @@
       const b = e.target.closest('[data-d]');
       if (!b) return;
       d[b.dataset.d] = b.dataset.v;
+      if (b.dataset.d === 'encabezado' && !b.dataset.v) d.miniatura = '';
       programarGuardado();
       pintarDiseno();
     });
@@ -1062,8 +1237,10 @@
     color.addEventListener('change', () => { d.acento = color.value; programarGuardado(); pintarDiseno(); });
     $('#imgEncabezado').addEventListener('change', async (e) => {
       try {
-        const { dataUrl } = await leerImagen(e.target.files[0], 1600);
+        const archivo = e.target.files[0];
+        const { dataUrl } = await leerImagen(archivo, 1600);
         d.encabezado = dataUrl;
+        d.miniatura = (await leerImagen(archivo, 480)).dataUrl;
         programarGuardado();
         pintarDiseno();
       } catch (err) { toast(err.message, 'err'); }
@@ -1309,7 +1486,7 @@
     if (rid !== renderId) return;
     document.title = `${form.titulo || 'Formulario'} · ${window.CONFIG.NOMBRE}`;
     if (form.cerrado) {
-      return pintarPublico(`<div class="result-card"><div class="result-icon muted-icon">${ic('clock')}</div><h2>${esc(form.titulo || 'Formulario')}</h2><p class="muted">Este formulario ya no acepta respuestas. Si crees que es un error, contacta a tu capacitador.</p></div>`, false, form.diseno);
+      return pintarPublico(`<div class="result-card"><div class="result-icon muted-icon">${ic('clock')}</div><h2>${esc(form.titulo || 'Formulario')}</h2><p class="muted">Este formulario ya no acepta respuestas. Si crees que es un error, contacta a quien te lo compartió.</p></div>`, false, form.diseno);
     }
 
     const preguntas = form.config.mezclarPreguntas ? mezclar(form.preguntas.slice()) : form.preguntas;
@@ -1341,7 +1518,7 @@
       const cabeza = `
           <div class="pq-head">
             <span class="q-num">${i + 1}</span>
-            <h3>${esc(p.texto || 'Pregunta')}${p.obligatoria ? '<span class="req">*</span>' : ''}</h3>
+            <h3>${p.textoHtml || p.texto ? textoRico(p.textoHtml, p.texto) : 'Pregunta'}${p.obligatoria ? '<span class="req">*</span>' : ''}</h3>
             ${p.puntos ? `<span class="chip">${p.puntos} pt${p.puntos === 1 ? '' : 's'}</span>` : ''}
           </div>`;
       return `
@@ -1357,7 +1534,7 @@
       <div class="pf-layout">
       <section class="pf-hero">
         <h1>${esc(form.titulo || 'Formulario')}</h1>
-        ${form.descripcion ? `<p>${esc(form.descripcion).replace(/\n/g, '<br>')}</p>` : ''}
+        ${form.descripcion ? `<p>${textoRico(form.descripcionHtml, form.descripcion)}</p>` : ''}
         <div class="pf-meta">
           <span class="chip chip-glass">${ic('list')} ${preguntas.length} pregunta${preguntas.length === 1 ? '' : 's'}</span>
           ${form.config.esExamen && total ? `<span class="chip chip-glass">${ic('target')} ${total} puntos</span>` : ''}
@@ -1496,7 +1673,7 @@
         <div class="confirm-art">${ic('mail')}<span class="confirm-check">${ic('check')}</span></div>
         <p class="eyebrow">Cuenta verificada</p>
         <h2>¡Tu correo quedó confirmado!</h2>
-        <p class="muted">${conSesion ? `Bienvenido${Sesion.usuario().nombre ? ', ' + esc(Sesion.usuario().nombre.split(' ')[0]) : ''}. Tu cuenta de capacitador ya está activa y lista para crear formularios y exámenes.` : 'Tu cuenta de capacitador ya está activa. Inicia sesión para empezar.'}</p>
+        <p class="muted">${conSesion ? `Bienvenido${Sesion.usuario().nombre ? ', ' + esc(Sesion.usuario().nombre.split(' ')[0]) : ''}. Tu cuenta de Formalia ya está activa y lista para crear formularios y exámenes.` : 'Tu cuenta de Formalia ya está activa. Inicia sesión para empezar.'}</p>
         <a class="btn btn-primary btn-lg" href="${conSesion ? '#/formularios' : '#/login'}">${conSesion ? 'Ir a mi panel' : 'Iniciar sesión'} ${ic('back', 'flip')}</a>
       </div>`);
   }

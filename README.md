@@ -1,6 +1,6 @@
-# Portal de Capacitación
+# Formalia
 
-Portal para capacitadores estilo Microsoft Forms: inicias sesión, ves tus formularios, los editas, compartes una liga y el examen se califica solo.
+Crea evaluaciones. Obtén resultados. Ahorra tiempo. Formularios y exámenes estilo Microsoft Forms: inicias sesión, ves tus formularios, los editas, compartes una liga y el examen se califica solo.
 
 - **Página**: GitHub Pages (HTML/CSS/JS, sin compilar nada).
 - **Datos y login**: Supabase (gratis).
@@ -8,8 +8,9 @@ Portal para capacitadores estilo Microsoft Forms: inicias sesión, ves tus formu
 
 ## Qué incluye
 
-- Login y registro de capacitadores.
-- Panel "Mis formularios" con búsqueda, duplicar, compartir y eliminar.
+- Login y registro con requisitos de contraseña (8+ caracteres, mayúscula, número y carácter especial) y mascota animada.
+- Panel "Mis formularios" con portada de cada formulario, búsqueda, duplicar, compartir y eliminar.
+- Enunciados y descripción con **negrita**, *cursiva* y ~~tachado~~ (selecciona el texto).
 - Editor con autoguardado y 12 tipos de pregunta (ver abajo).
 - Imagen de apoyo opcional en **cualquier** pregunta (arriba o al lado del enunciado; se amplía al tocarla).
 - Pestaña **Diseño**: 5 composiciones (Clásica, Portada, Lateral, Paso a paso, Minimalista), 12 plantillas (oscuras y claras), 12 tipos de letra, 4 tamaños, color de acento e imagen de encabezado.
@@ -63,6 +64,7 @@ Opcional:
 | `js/diseno.js` | Plantillas, fuentes y tamaños |
 | `js/ui.js` | Iconos y utilidades compartidas |
 | `supabase.sql` | Tablas, seguridad y calificación en Supabase |
+| `img/` | Logo, favicon y mascota de Formalia |
 
 ## Tipos de pregunta
 
@@ -126,4 +128,4 @@ El diseño del formulario se guarda en `diseno`:
 - **Párrafo**: no se califica.
 - **Tipos interactivos**: ver la tabla de "Tipos de pregunta".
 
-> Cada vez que actualices el portal, vuelve a ejecutar `supabase.sql` en Supabase (se puede correr varias veces sin perder datos).
+> Cada vez que actualices Formalia, vuelve a ejecutar `supabase.sql` en Supabase (se puede correr varias veces sin perder datos).

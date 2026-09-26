@@ -193,7 +193,7 @@ function mezclarOrden(a) {
 // Lo que ve quien responde: sin respuestas correctas.
 function preguntaPublica(p, examen) {
   const base = {
-    id: p.id, tipo: p.tipo, texto: p.texto, obligatoria: !!p.obligatoria,
+    id: p.id, tipo: p.tipo, texto: p.texto, textoHtml: p.textoHtml || '', obligatoria: !!p.obligatoria,
     puntos: examen && esCalificable(p) ? Number(p.puntos) || 0 : 0,
     opciones: (p.opciones || []).map((o) => ({ id: o.id, texto: o.texto })),
     apoyo: p.apoyo && p.apoyo.imagen ? { imagen: p.apoyo.imagen, posicion: p.apoyo.posicion || 'arriba' } : null
@@ -240,6 +240,7 @@ function formPublico(form) {
     id: form.id,
     titulo: form.titulo,
     descripcion: form.descripcion,
+    descripcionHtml: form.descripcionHtml || '',
     diseno: form.diseno || {},
     config: {
       esExamen: !!cfg.esExamen,

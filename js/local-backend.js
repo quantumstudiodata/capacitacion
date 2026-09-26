@@ -157,7 +157,10 @@ const LocalBackend = (() => {
       numPreguntas: (form.preguntas || []).length,
       numRespuestas,
       esExamen: !!form.config.esExamen,
-      aceptaRespuestas: !!form.config.aceptaRespuestas
+      aceptaRespuestas: !!form.config.aceptaRespuestas,
+      plantilla: (form.diseno || {}).plantilla,
+      acento: (form.diseno || {}).acento,
+      portada: (form.diseno || {}).miniatura || (form.diseno || {}).encabezado || ''
     };
   }
 

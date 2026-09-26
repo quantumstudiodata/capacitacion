@@ -220,6 +220,7 @@ begin
     'id', p->'id',
     'tipo', p->'tipo',
     'texto', p->'texto',
+    'textoHtml', coalesce(p->'textoHtml', '""'),
     'obligatoria', _bool(p->'obligatoria'),
     'puntos', case when examen and _calificable(p) then coalesce((p->>'puntos')::numeric, 0) else 0 end,
     'opciones', coalesce((
@@ -306,6 +307,7 @@ begin
     'id', f.id,
     'titulo', f.datos->'titulo',
     'descripcion', f.datos->'descripcion',
+    'descripcionHtml', coalesce(f.datos->'descripcionHtml', '""'),
     'diseno', coalesce(f.datos->'diseno', '{}'),
     'config', jsonb_build_object(
       'esExamen', examen,
@@ -413,9 +415,30 @@ begin
 end;
 $$;
 
+-- Resumen de "Mis formularios" sin descargar las preguntas ni las imágenes completas.
+create or replace function public.mis_formularios()
+returns table (
+  id uuid, titulo text, descripcion text, actualizado timestamptz, num_preguntas int, num_respuestas bigint,
+  es_examen boolean, acepta boolean, plantilla text, acento text, portada text
+)
+language sql stable security invoker set search_path = public as $$
+  select f.id, f.datos->>'titulo', f.datos->>'descripcion', f.actualizado,
+    case when jsonb_typeof(f.datos->'preguntas') = 'array' then jsonb_array_length(f.datos->'preguntas') else 0 end,
+    (select count(*) from public.respuestas r where r.form_id = f.id),
+    _bool(f.datos->'config'->'esExamen'), _bool(f.datos->'config'->'aceptaRespuestas'),
+    f.datos->'diseno'->>'plantilla', f.datos->'diseno'->>'acento',
+    coalesce(nullif(f.datos->'diseno'->>'miniatura', ''), nullif(f.datos->'diseno'->>'encabezado', ''))
+  from public.formularios f
+  where f.owner = auth.uid()
+  order by f.actualizado desc
+$$;
+
+revoke all on function public.mis_formularios() from public;
+grant execute on function public.mis_formularios() to authenticated;
+
 -- Versión del esquema: el portal avisa al capacitador si su base de datos está desactualizada.
 create or replace function public.portal_version() returns int
-language sql immutable as $$ select 4 $$;
+language sql immutable as $$ select 5 $$;
 
 grant execute on function public.portal_version() to anon, authenticated;
 revoke all on function public.formulario_publico(uuid, boolean) from public;

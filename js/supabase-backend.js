@@ -92,6 +92,17 @@ const SupabaseBackend = (() => {
 
     async listForms() {
       await requiereSesion();
+      // Resumen ligero desde la base (sin descargar preguntas ni imágenes completas).
+      const rapido = await sb().rpc('mis_formularios');
+      if (!rapido.error) {
+        return rapido.data.map((f) => ({
+          id: f.id, titulo: f.titulo, descripcion: f.descripcion, actualizado: new Date(f.actualizado).getTime(),
+          numPreguntas: f.num_preguntas, numRespuestas: Number(f.num_respuestas) || 0,
+          esExamen: f.es_examen, aceptaRespuestas: f.acepta,
+          plantilla: f.plantilla, acento: f.acento, portada: f.portada || ''
+        }));
+      }
+      // Base de datos sin actualizar: se usa la consulta completa.
       const filas = revisar(await sb().from('formularios')
         .select('id, datos, actualizado, respuestas(count)')
         .order('actualizado', { ascending: false }));
@@ -105,7 +116,9 @@ const SupabaseBackend = (() => {
           numPreguntas: (form.preguntas || []).length,
           numRespuestas: (f.respuestas && f.respuestas[0] && f.respuestas[0].count) || 0,
           esExamen: !!(form.config && form.config.esExamen),
-          aceptaRespuestas: !!(form.config && form.config.aceptaRespuestas)
+          aceptaRespuestas: !!(form.config && form.config.aceptaRespuestas),
+          plantilla: (form.diseno || {}).plantilla, acento: (form.diseno || {}).acento,
+          portada: (form.diseno || {}).miniatura || (form.diseno || {}).encabezado || ''
         };
       });
     },
