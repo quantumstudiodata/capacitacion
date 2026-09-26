@@ -521,33 +521,35 @@
 
   // ---------- Panel ----------
   let listaForms = [];
+  let filtroForms = 'todos';
 
   async function vistaDashboard(id) {
     document.title = `Mis formularios · ${window.CONFIG.NOMBRE}`;
     const u = Sesion.usuario();
+    filtroForms = 'todos';
     app.innerHTML = `
       ${topbar()}
       <main class="container">
-        <section class="hero">
-          <p class="eyebrow">Tu espacio</p>
-          <h1>Hola, <span class="grad-text">${esc(String(u.nombre).split(' ')[0])}</span></h1>
-          <p class="muted">¿Qué vas a crear hoy?</p>
-        </section>
-        <section class="create-grid">
-          <button class="create-card" data-crear="formulario">
-            <span class="cc-icon">${ic('form')}</span>
-            <span class="cc-text"><strong>Nuevo formulario</strong><small>Exámenes, cuestionarios o encuestas</small></span>
-            <span class="cc-plus">${ic('plus')}</span>
-          </button>
-          <div class="create-card soon" aria-disabled="true">
-            <span class="cc-icon muted-icon">${ic('book')}</span>
-            <span class="cc-text"><strong>Contenido</strong><small>Sube materiales de apoyo</small></span>
-            <span class="chip">Próximamente</span>
+        <section class="hero-banner">
+          <div class="hb-text">
+            <p class="eyebrow">Tu espacio</p>
+            <h1>Hola, <span class="grad-text">${esc(String(u.nombre).split(' ')[0])}</span>. Crea evaluaciones que se califican solas.</h1>
+            <p class="muted">Empieza desde cero o retoma un formulario. La foca se encarga de calificar.</p>
+            <div class="hb-acciones">
+              <button type="button" class="btn btn-primary" data-crear="formulario">${ic('plus')} Nuevo formulario</button>
+              <span class="chip soon-chip">${ic('book')} Contenido · Próximamente</span>
+            </div>
           </div>
+          <div class="hb-mascota" aria-hidden="true"><img src="img/foca2.png" alt=""></div>
         </section>
         <section>
           <div class="section-head">
             <h2>Mis formularios</h2>
+            <div class="tabs-filtro" role="group" aria-label="Filtrar formularios">
+              <button type="button" class="chip-filtro sel" data-filtro="todos">Todos</button>
+              <button type="button" class="chip-filtro" data-filtro="abiertos">Abiertos</button>
+              <button type="button" class="chip-filtro" data-filtro="cerrados">Cerrados</button>
+            </div>
             <label class="search">${ic('search')}<input id="buscar" placeholder="Buscar formularios" autocomplete="off"></label>
           </div>
           <div class="forms-grid" id="formsGrid">${'<div class="form-card skeleton"></div>'.repeat(3)}</div>
@@ -558,6 +560,11 @@
     $$('[data-crear]').forEach((b) => b.addEventListener('click', () => crearForm(b.dataset.crear, b)));
     avisoVersion();
     $('#buscar').addEventListener('input', pintarLista);
+    $$('[data-filtro]').forEach((b) => b.addEventListener('click', () => {
+      filtroForms = b.dataset.filtro;
+      $$('[data-filtro]').forEach((x) => x.classList.toggle('sel', x === b));
+      pintarLista();
+    }));
 
     try {
       const lista = await API.call('listForms');
@@ -574,7 +581,9 @@
     const grid = $('#formsGrid');
     if (!grid) return;
     const q = normalizarTexto($('#buscar').value);
-    const lista = listaForms.filter((f) => !q || normalizarTexto(f.titulo).includes(q));
+    let lista = listaForms.filter((f) => !q || normalizarTexto(f.titulo).includes(q));
+    if (filtroForms === 'abiertos') lista = lista.filter((f) => f.aceptaRespuestas);
+    if (filtroForms === 'cerrados') lista = lista.filter((f) => !f.aceptaRespuestas);
     if (!listaForms.length) {
       grid.innerHTML = `
         <div class="empty">
@@ -585,7 +594,7 @@
       return;
     }
     if (!lista.length) {
-      grid.innerHTML = `<div class="empty"><p class="muted">No hay formularios que coincidan con “${esc($('#buscar').value)}”.</p></div>`;
+      grid.innerHTML = `<div class="empty"><p class="muted">No hay formularios que coincidan con la búsqueda o el filtro.</p></div>`;
       return;
     }
     grid.innerHTML = lista.map((f, i) => `
@@ -697,6 +706,7 @@
 
   // ---------- Editor ----------
   let E = null; // { form, tab, respuestas, sucio, timer, guardando }
+  let preguntaActiva = null; // id de la pregunta expandida en "Preguntas"; las demás se muestran como fila resumen
 
   function setEstado(texto, tipo = '') {
     const el = $('#saveState');
@@ -755,6 +765,7 @@
         form.preguntas = form.preguntas || [];
         form.diseno = Diseno.normalizar(form.diseno);
         E = { form, tab, respuestas: null, sucio: false, timer: null, guardando: null };
+        preguntaActiva = null;
       } catch (err) {
         if (rid !== renderId) return;
         app.innerHTML = `${topbar()}<main class="container narrow"><div class="empty">${ic('alert')}<h3>No se pudo abrir</h3><p class="muted">${esc(err.message)}</p><a class="btn btn-ghost" href="#/formularios">${ic('back')} Volver</a></div></main>`;
@@ -919,7 +930,12 @@
       const nueva = nuevaPregunta(b.dataset.tipo);
       lista.push(nueva);
       enfocar = nueva.id;
+      preguntaActiva = nueva.id;
       $('#tipoMenu') && $('#tipoMenu').classList.remove('open');
+    } else if (accion === 'activar') {
+      preguntaActiva = p.id;
+      pintarPreguntas();
+      return;
     } else if (accion === 'menuTipos') {
       e.stopPropagation();
       $('#tipoMenu').classList.toggle('open');
@@ -1017,6 +1033,28 @@
     actualizarTotal();
   }
 
+  // Icono compacto de estado para la fila resumen (colapsada) de cada pregunta.
+  function estadoIconoPregunta(p) {
+    const html = avisoPregunta(p);
+    if (!html) return '';
+    if (html.includes('q-manual')) return `<span class="q-row-estado manual" title="Se calificará manualmente">${ic('users')}</span>`;
+    if (html.includes('q-ok')) return `<span class="q-row-estado ok" title="Respuesta configurada">${ic('check')}</span>`;
+    return `<span class="q-row-estado warn" title="Falta configurar la respuesta correcta">${ic('alert')}</span>`;
+  }
+
+  // Fila resumen de una pregunta colapsada; se expande al hacer clic (ver tarjetaPregunta).
+  function filaPregunta(p, i) {
+    const examen = E.form.config.esExamen;
+    const texto = (p.texto || '').trim();
+    return `
+      <button type="button" class="q-row" data-qid="${esc(p.id)}" data-qa="activar">
+        <span class="q-num">${i + 1}</span>
+        <span class="q-row-text">${texto ? esc(texto) : '<em>Sin enunciado</em>'}</span>
+        <span class="q-row-meta">${esc(TIPOS[p.tipo].nombre)}${examen && p.tipo !== 'parrafo' ? ` · ${Number(p.puntos) || 0} pts` : ''}</span>
+        ${estadoIconoPregunta(p)}
+      </button>`;
+  }
+
   const gruposTipos = () => {
     const todos = Object.entries(TIPOS);
     return [['Básicas', todos.filter(([k]) => !Tipos.es(k))], ['Interactivas', todos.filter(([k]) => Tipos.es(k))]];
@@ -1048,26 +1086,8 @@
         ${examen ? '<p class="hint">Las preguntas de párrafo no se califican automáticamente.</p>' : ''}`;
     }
     return `
-      <article class="q-card" data-qid="${esc(p.id)}" style="--i:${i}">
-        <div class="q-top">
-          <span class="q-num">${i + 1}</span>
-          <div class="tipo-picker">
-            <button type="button" class="tipo-btn" data-qa="abrirTipos" aria-haspopup="true">
-              <span class="tipo-ic">${ic(TIPOS[p.tipo].icono)}</span><span>${TIPOS[p.tipo].nombre}</span>${ic('down', 'chev')}
-            </button>
-            <div class="tipo-pop" role="menu">
-              ${gruposTipos().map(([g, tipos]) => `
-                <p class="type-group">${g}</p>
-                <div class="tipo-grid">${tipos.map(([k, t]) => `
-                  <button type="button" role="menuitem" class="tipo-opt ${k === p.tipo ? 'sel' : ''}" data-qa="elegirTipo" data-tipo="${k}">
-                    <span class="tipo-ic">${ic(t.icono)}</span><span class="tipo-txt"><strong>${t.nombre}</strong><small>${DESC_TIPOS[k] || ''}</small></span>
-                  </button>`).join('')}</div>`).join('')}
-            </div>
-          </div>
-          <label class="btn btn-ghost btn-sm apoyo-btn" title="Agregar una imagen a esta pregunta">${ic('image')}<span>${p.apoyo && p.apoyo.imagen ? 'Cambiar imagen' : 'Imagen'}</span>
-            <input type="file" accept="image/*" data-q="apoyoArchivo" hidden></label>
-          ${examen && p.tipo !== 'parrafo' ? `<label class="pts"><input type="number" min="0" step="1" data-q="puntos" value="${Number(p.puntos) || 0}" aria-label="Puntos"><span>pts</span></label>` : ''}
-        </div>
+      <article class="q-card q-activa" data-qid="${esc(p.id)}" style="--i:${i}">
+        <div class="q-top-mini"><span class="q-num">${i + 1}</span></div>
         ${p.apoyo && p.apoyo.imagen ? `
           <div class="q-enunciado ${p.apoyo.posicion === 'lado' ? 'lado' : 'arriba'}">
             <figure class="apoyo-edit">
@@ -1083,22 +1103,37 @@
             <div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="${esc(PLACEHOLDER_TIPO[p.tipo] || 'Escribe la pregunta')}" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>
           </div>` : `<div class="q-text rt" contenteditable="true" data-q="texto" data-placeholder="${esc(PLACEHOLDER_TIPO[p.tipo] || 'Escribe la pregunta')}" aria-label="Enunciado de la pregunta">${textoRico(p.textoHtml, p.texto)}</div>`}
         <div class="q-body">${cuerpo}</div>
-        <div class="q-foot">
-          <span class="q-aviso">${avisoPregunta(p)}</span>
-          <div class="q-tools">
-            <label class="switch sm" title="Obligatoria"><input type="checkbox" data-q="obligatoria" ${p.obligatoria ? 'checked' : ''}><span class="sw"></span><span class="sw-label">Obligatoria</span></label>
-            <span class="sep"></span>
-            <button type="button" class="icon-btn" data-qa="subir" ${i === 0 ? 'disabled' : ''} aria-label="Subir">${ic('up')}</button>
-            <button type="button" class="icon-btn" data-qa="bajar" ${i === total - 1 ? 'disabled' : ''} aria-label="Bajar">${ic('down')}</button>
-            <button type="button" class="icon-btn" data-qa="duplicar" aria-label="Duplicar">${ic('copy')}</button>
-            <button type="button" class="icon-btn danger" data-qa="eliminar" aria-label="Eliminar">${ic('trash')}</button>
+        <div class="q-aviso-row"><span class="q-aviso">${avisoPregunta(p)}</span></div>
+        <div class="q-toolbar" role="toolbar" aria-label="Herramientas de la pregunta">
+          <div class="tipo-picker">
+            <button type="button" class="tipo-btn" data-qa="abrirTipos" aria-haspopup="true">
+              <span class="tipo-ic">${ic(TIPOS[p.tipo].icono)}</span><span>${TIPOS[p.tipo].nombre}</span>${ic('down', 'chev')}
+            </button>
+            <div class="tipo-pop" role="menu">
+              ${gruposTipos().map(([g, tipos]) => `
+                <p class="type-group">${g}</p>
+                <div class="tipo-grid">${tipos.map(([k, t]) => `
+                  <button type="button" role="menuitem" class="tipo-opt ${k === p.tipo ? 'sel' : ''}" data-qa="elegirTipo" data-tipo="${k}">
+                    <span class="tipo-ic">${ic(t.icono)}</span><span class="tipo-txt"><strong>${t.nombre}</strong><small>${DESC_TIPOS[k] || ''}</small></span>
+                  </button>`).join('')}</div>`).join('')}
+            </div>
           </div>
+          ${examen && p.tipo !== 'parrafo' ? `<label class="pts"><input type="number" min="0" step="1" data-q="puntos" value="${Number(p.puntos) || 0}" aria-label="Puntos"><span>pts</span></label>` : ''}
+          <label class="switch sm" title="Obligatoria"><input type="checkbox" data-q="obligatoria" ${p.obligatoria ? 'checked' : ''}><span class="sw"></span><span class="sw-label">Obligatoria</span></label>
+          <span class="tb-sep"></span>
+          <label class="btn btn-ghost btn-sm apoyo-btn" title="Agregar una imagen a esta pregunta">${ic('image')}<span>${p.apoyo && p.apoyo.imagen ? 'Cambiar imagen' : 'Imagen'}</span>
+            <input type="file" accept="image/*" data-q="apoyoArchivo" hidden></label>
+          <button type="button" class="icon-btn" data-qa="subir" ${i === 0 ? 'disabled' : ''} aria-label="Subir">${ic('up')}</button>
+          <button type="button" class="icon-btn" data-qa="bajar" ${i === total - 1 ? 'disabled' : ''} aria-label="Bajar">${ic('down')}</button>
+          <button type="button" class="icon-btn" data-qa="duplicar" aria-label="Duplicar">${ic('copy')}</button>
+          <button type="button" class="icon-btn danger" data-qa="eliminar" aria-label="Eliminar">${ic('trash')}</button>
         </div>
       </article>`;
   }
 
   function pintarPreguntas() {
     const f = E.form;
+    if (!f.preguntas.some((p) => p.id === preguntaActiva)) preguntaActiva = f.preguntas.length ? f.preguntas[0].id : null;
     const cuerpo = $('#editorBody');
     const scroll = window.scrollY;
     cuerpo.innerHTML = `
@@ -1120,7 +1155,7 @@
         </div>
       </section>
       <div class="q-list">
-        ${f.preguntas.length ? f.preguntas.map((p, i) => tarjetaPregunta(p, i, f.preguntas.length)).join('') : `<div class="empty small"><p class="muted">Este formulario no tiene preguntas todavía.</p></div>`}
+        ${f.preguntas.length ? f.preguntas.map((p, i) => p.id === preguntaActiva ? tarjetaPregunta(p, i, f.preguntas.length) : filaPregunta(p, i)).join('') : `<div class="empty small"><p class="muted">Este formulario no tiene preguntas todavía.</p></div>`}
       </div>
       <div class="add-q">
         <button type="button" class="btn btn-add" data-qa="menuTipos">${ic('plus')} Agregar pregunta</button>
